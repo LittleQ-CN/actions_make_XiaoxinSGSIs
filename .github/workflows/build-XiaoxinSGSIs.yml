@@ -14,9 +14,7 @@ jobs:
       uses: actions/checkout@v3
       
     - name: 清理工作区
-      run: |
-        rm -rf SGSI-build-tool || true
-        df -h
+      run: rm -rf SGSI-build-tool || true && df -h
         
     - name: 读取配置变量
       id: var
@@ -42,85 +40,66 @@ jobs:
         
     - name: 初始化环境
       run: |
-        # 安全解压（跳过权限设置）
-        tar -xf SGSI-build-tool.tar --no-same-permissions --no-same-owner
-        
+        tar -xf SGSI-build-tool.tar
         if [ ! -d "SGSI-build-tool" ]; then
           echo "::error::未找到SGSI-build-tool目录"
           ls -la
           exit 1
         fi
-        
-        # 递归移除所有特权命令
-        echo "清理脚本中的特权命令..."
-        find SGSI-build-tool -type f -name "*.sh" -exec sed -i -e '/chown/d' -e '/chmod/d' -e '/sudo/d' {} \;
-        
-        # 设置全局权限
-        echo "设置目录权限..."
         chmod -R a+rwx SGSI-build-tool
-        
         cd SGSI-build-tool
-        
         if [ ! -d "10" ]; then
           echo "::error::缺少Android 10构建目录"
           exit 1
         fi
-        
         if [ ! -f "10/setup.sh" ]; then
           echo "::error::未找到setup.sh安装脚本"
           exit 1
         fi
-        
-        # 再次清理setup.sh
-        sed -i -e '/chown/d' -e '/chmod/d' -e '/sudo/d' 10/setup.sh
-        
-        # 运行环境设置
         cd 10
         bash setup.sh
-        
         cd ../..
         
     - name: 下载ROM
       run: wget -c ${{ steps.var.outputs.rom_url }} -O SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
     
     - name: 构建Super分区SGSI
-      if: steps.var.outputs.make_super == 'true'
-      run: |
-        sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
+      if: ${{ steps.var.outputs.make_super == 'true' }}
+      run: sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
     
     - name: 生成MIUI SGSI
-      if: steps.var.outputs.make_miui == 'true'
+      if: ${{ steps.var.outputs.make_miui == 'true' }}
       run: |
         rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成Flyme SGSI
-      if: steps.var.outputs.make_flyme == 'true'
+      if: ${{ steps.var.outputs.make_flyme == 'true' }}
       run: |
         rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成ColorOS SGSI
-      if: steps.var.outputs.make_coloros == 'true'
+      if: ${{ steps.var.outputs.make_coloros == 'true' }}
       run: |
         python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
         rm -rf SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成H2OS SGSI
-      if: steps.var.outputs.make_h2os == 'true'
+      if: ${{ steps.var.outputs.make_h2os == 'true' }}
       run: |
         rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成SmartisanOS SGSI
-      if: steps.var.outputs.make_smartisanos == 'true'
+      if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
       run: |
         rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成ZUI SGSI
-      if: steps.var.outputs.make_zui == 'true'
+      if: ${{ steps.var.outputs.make_zui == 'true' }}
       run: |
         rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
@@ -128,18 +107,56 @@ jobs:
     - name: 生成SGSI镜像
       timeout-minutes: 120
       run: |
-        # 清理旧文件
-        rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
+        # 清理文件
+        rm -f SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
         
-        # 将构建脚本移动到SGSI-build-tool/10目录
+        # 移动文件
         mv make/* SGSI-build-tool/10/
-        
-        # 将工具文件移动到SGSI-build-tool/10/bin目录
         mv bin/* SGSI-build-tool/10/bin/
         
-        # 执行构建
+        # 进入目录
         cd SGSI-build-tool/10
+        
+        # 创建目录结构
+        mkdir -p ./out/system ./out/config
+        mkdir -p ./out/system/bin
+        mkdir -p ./out/system/etc
+        mkdir -p ./out/system/lib
+        mkdir -p ./out/system/usr
+        mkdir -p ./out/system/framework
+        mkdir -p ./out/system/app
+        mkdir -p ./out/system/priv-app
+        mkdir -p ./out/system/vendor
+        
+        # 创建默认配置文件
+        if [ ! -f "./out/config/system_file_contexts" ]; then
+          echo "# 默认文件上下文" > ./out/config/system_file_contexts
+          echo "/system(/.*)? u:object_r:system_file:s0" >> ./out/config/system_file_contexts
+          echo "/vendor(/.*)? u:object_r:vendor_file:s0" >> ./out/config/system_file_contexts
+        fi
+        
+        if [ ! -f "./out/config/system_fs_config" ]; then
+          echo "# 默认文件系统配置" > ./out/config/system_fs_config
+          echo "/system 0 0 755" >> ./out/config/system_fs_config
+          echo "/vendor 0 0 755" >> ./out/config/system_fs_config
+        fi
+        
+        # 执行构建
         bash make.sh
+        
+        # 检查结果
+        if [ ! -f "./out/system.img" ]; then
+          echo "::error::system.img未生成，尝试手动创建"
+          ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 ./out/system.img 512M
+          ./bin/e2fsdroid -e -T 1230768000 -C ./out/config/system_fs_config -S ./out/config/system_file_contexts -f ./out/system/ -a /system ./out/system.img || true
+          if [ ! -f "./out/system.img" ]; then
+            echo "::error::无法生成system.img，构建失败"
+            exit 1
+          fi
+        fi
+        
+        # 移动镜像
+        mv ./out/system.img ./SGSI/
         
     - name: 打包补丁文件
       run: |
@@ -152,13 +169,16 @@ jobs:
       run: |
         mkdir -p upload
         zip -r ${{ steps.var.outputs.pack_sgsi }} SGSI-build-tool/10/SGSI/*
-        if [[ $(du -sb ${{ steps.var.outputs.pack_sgsi }} | awk '{print $1}') -gt 2097152000 ]];then
-              echo "::notice::文件过大，进行分割打包..."
-              tar -cpzf - ${{ steps.var.outputs.pack_sgsi }} | split -d -b 1024m - upload/${{ steps.var.outputs.pack_sgsi }}
-          else
-              mv ${{ steps.var.outputs.pack_sgsi }} upload/
-          fi
-          ls "upload"
+        filesize=$(du -sb ${{ steps.var.outputs.pack_sgsi }} | awk '{print $1}')
+        max_size=2097152000
+        
+        if [ $filesize -gt $max_size ]; then
+          echo "::notice::文件过大，进行分割打包..."
+          tar -cpzf - ${{ steps.var.outputs.pack_sgsi }} | split -d -b 1024m - upload/${{ steps.var.outputs.pack_sgsi }}_
+        else
+          mv ${{ steps.var.outputs.pack_sgsi }} upload/
+        fi
+        ls -lh upload
           
     - name: 发布SGSI版本
       uses: ncipollo/release-action@v1.8.6
