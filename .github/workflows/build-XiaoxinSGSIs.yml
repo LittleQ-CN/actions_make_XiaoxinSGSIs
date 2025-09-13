@@ -42,25 +42,27 @@ jobs:
         
     - name: 初始化环境
       run: |
-        # 安全解压文件，避免权限问题
-        tar -xf SGSI-build-tool.tar --no-same-owner
+        # 安全解压文件
+        tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
         
+        # 检查目录结构
         if [ ! -d "SGSI-build-tool" ]; then
           echo "::error::未找到SGSI-build-tool目录"
           ls -la
           exit 1
         fi
         
-        # 仅设置必要的权限，避免chown
-        find SGSI-build-tool -type d -exec chmod 775 {} +
-        find SGSI-build-tool -type f -exec chmod 664 {} +
+        # 递归添加执行权限
+        find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
         
-        # 确保关键目录可执行
+        # 设置关键权限
+        chmod -R a+rwX SGSI-build-tool
         chmod +x SGSI-build-tool/10/setup.sh
         chmod +x SGSI-build-tool/10/make.sh
         
+        # 安装依赖
         cd SGSI-build-tool/10
-        bash setup.sh
+        ./setup.sh
         cd ../..
         
     - name: 下载ROM
@@ -89,7 +91,7 @@ jobs:
       run: |
         python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
         rm -f SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/f极速版ixbug.sh
+        mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
         chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成H2OS SGSI
@@ -117,35 +119,29 @@ jobs:
       timeout-minutes: 120
       run: |
         # 清理文件
-        rm -f SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh
+        rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
         
         # 移动文件
         mv make/* SGSI-build-tool/10/
         mv bin/* SGSI-build-tool/10/bin/
         
-        # 设置关键工具权限
-        chmod +x SGSI-build-tool/10/make.sh
-        chmod +x SGSI-build-tool/10/bin/mke2fs
-        chmod +x SGSI-build-tool/10/bin/e2fsdroid
+        # 设置执行权限
+        find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
+        chmod +x SGSI-build-tool/10/bin/{mke2fs,e2fsdroid}
         
-        # 进入目录
+        # 进入构建目录
         cd SGSI-build-tool/10
         
         # 创建目录结构
-        mkdir -p out/system out/config
+        mkdir -p out/{system,config}
         mkdir -p out/system/{bin,etc,lib,usr,framework,app,priv-app,vendor}
         
         # 创建默认配置文件
-        echo "# 默认文件上下文" > out/config/system_file_contexts
-        echo "/system(/.*)? u:object_r:system_file:s0" >> out/config/system_file_contexts
-        echo "/vendor(/.*)? u:object_r:vendor_file:s0" >> out/config/system_file_contexts
-        
-        echo "# 默认文件系统配置" > out/config/system_fs_config
-        echo "/system 0 0 755" >> out/config/system_fs_config
-        echo "/vendor 0 0 755" >> out/config/system_fs_config
+        echo -e "# 默认文件上下文\n/system(/.*)? u:object_r:system_file:s0\n/vendor(/.*)? u:object_r:vendor_file:s0" > out/config/system_file_contexts
+        echo -e "# 默认文件系统配置\n/system 0 0 755\n/vendor 0 0 755" > out/config/system_fs_config
         
         # 执行构建
-        bash make.sh
+        ./make.sh
         
         # 检查结果
         if [ ! -f "out/system.img" ]; then
@@ -163,10 +159,10 @@ jobs:
         
     - name: 打包补丁文件
       run: |
-        zip -r Patch1.zip Patch/Patch1/*
-        zip -r Patch2.zip Patch/Patch2/*
-        zip -r Patch3.zip Patch/Patch3/*
-        mv Patch1.zip Patch2.zip Patch3.zip SGSI-build-tool/10/SGSI/
+        for i in 1 2 3; do
+          zip -r "Patch$i.zip" "Patch/Patch$i"/*
+          mv "Patch$i.zip" SGSI-build-tool/10/SGSI/
+        done
 
     - name: 压缩SGSI成果物
       run: |
@@ -175,15 +171,17 @@ jobs:
         zip -r ../../../../${{ steps.var.outputs.pack_sgsi }} *
         cd ../../../../
         
-        filesize=$(stat -c%s "${{ steps.var.outputs.pack_sgsi }}")
+        # 检查文件大小
         max_size=2000000000
+        file_size=$(stat -c%s "${{ steps.var.outputs.pack_sgsi }}")
         
-        if [ $filesize -gt $max_size ]; then
-          echo "::notice::文件过大($filesize字节)，进行分割打包..."
-          split -b 1000m "${{ steps.var.outputs.pack_sgsi }}" "upload/${{ steps.var.outputs.pack_sgsi }}_part_"
+        if [ $file_size -gt $max_size ]; then
+          echo "::notice::文件过大($file_size字节)，进行分割打包..."
+          split -d -b 1000m "${{ steps.var.outputs.pack_sgsi }}" "upload/${{ steps.var.outputs.pack_sgsi }}_part"
         else
           mv "${{ steps.var.outputs.pack_sgsi }}" upload/
         fi
+        
         ls -lh upload
           
     - name: 发布SGSI版本
