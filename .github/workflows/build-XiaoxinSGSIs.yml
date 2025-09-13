@@ -22,7 +22,7 @@ jobs:
       id: var
       run: |
         echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "rom_name=$(jq -r '.rom_name' sg极速版.json)" >> $GITHUB_OUTPUT
+        echo "rom_name=$(jq -r '.rom_name' sgsi.json)" >> $GITHUB_OUTPUT
         echo "pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)" >> $GITHUB_OUTPUT
         echo "make_miui=$(jq -r '.make_miui' sgsi.json)" >> $GITHUB_OUTPUT
         echo "make_flyme=$(jq -r '.make_flyme' sgsi.json)" >> $GITHUB_OUTPUT
@@ -42,13 +42,22 @@ jobs:
         
     - name: 初始化环境
       run: |
-        tar -xf SGSI-build-tool.tar
+        # 安全解压（跳过权限设置）
+        tar -xf SGSI-build-tool.tar --no-same-permissions --no-same-owner
         
         if [ ! -d "SGSI-build-tool" ]; then
           echo "::error::未找到SGSI-build-tool目录"
           ls -la
           exit 1
         fi
+        
+        # 递归移除所有特权命令
+        echo "清理脚本中的特权命令..."
+        find SGSI-build-tool -type f -name "*.sh" -exec sed -i -e '/chown/d' -e '/chmod/d' -e '/sudo/d' {} \;
+        
+        # 设置全局权限
+        echo "设置目录权限..."
+        chmod -R a+rwx SGSI-build-tool
         
         cd SGSI-build-tool
         
@@ -62,11 +71,11 @@ jobs:
           exit 1
         fi
         
+        # 再次清理setup.sh
+        sed -i -e '/chown/d' -e '/chmod/d' -e '/sudo/d' 10/setup.sh
+        
+        # 运行环境设置
         cd 10
-        
-        sed -i '/chown/d' setup.sh
-        sed -i '/chmod/d' setup.sh
-        
         bash setup.sh
         
         cd ../..
@@ -116,7 +125,6 @@ jobs:
         rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
          
-    # 修正的关键部分开始
     - name: 生成SGSI镜像
       timeout-minutes: 120
       run: |
@@ -132,7 +140,6 @@ jobs:
         # 执行构建
         cd SGSI-build-tool/10
         bash make.sh
-    # 修正的关键部分结束
         
     - name: 打包补丁文件
       run: |
