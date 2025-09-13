@@ -2,30 +2,32 @@ name: build_XiaoxinSGSIs
 
 on:
   watch:
-    types: [started]
-#  push:
+    types: [started]  # 监听仓库的star事件
+#  push:               # 代码推送时触发
 #    branches: [ master ]
-#  pull_request:
+#  pull_request:       # 创建PR时触发
 #    branches: [ master ]
     
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04  # 使用Ubuntu 22.04运行环境
+    # 仅当仓库所有者自己触发时运行
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-    - name: Checkout
+    - name: 检出代码
       uses: actions/checkout@v3
       
-    - name: Clean Workspace
+    - name: 清理工作区
       run: |
-        # 只清理当前工作区，避免破坏系统文件
+        # 安全清理工作区，不影响系统文件
         sudo rm -rf SGSI-build-tool || true
-        df -h
+        df -h  # 显示磁盘使用情况
         
-    - name: Get variables
+    - name: 读取配置变量
       id: var
       run: |
+        # 从sgsi.json文件中提取所需变量
         echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUTPUT
         echo "rom_name=$(jq -r '.rom_name' sgsi.json)" >> $GITHUB_OUTPUT
         echo "pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)" >> $GITHUB_OUTPUT
@@ -37,98 +39,151 @@ jobs:
         echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
         echo "make_super=$(jq -r '.make_super' sgsi.json)" >> $GITHUB_OUTPUT
         
-    - name: Download XiaoxinSGSIs Tools
-      uses: robinraju/release-downloader@v1
-      with:
-        repository: "xiaoxindada/SGSI-build-tool"
-        tag: "v1.9"
-        fileName: "SGSI-build-tool.tar"
-        
-    - name: Initialization environment
+    - name: 下载构建工具
       run: |
+        # 从GitHub下载SGSI构建工具包
+        wget -c https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
+        # 检查下载是否成功
+        if [ ! -f SGSI-build-tool.tar ]; then
+          echo "::error::工具包下载失败"
+          exit 1
+        fi
+        
+    - name: 初始化环境
+      run: |
+        # 解压工具包
         tar -xf SGSI-build-tool.tar
-        rm -rf SGSI-build-tool/10/setup.sh
-        mv bin/setup.sh SGSI-build-tool/10/
-        cd SGSI-build-tool/10
+        
+        # 验证目录结构
+        if [ ! -d "./SGSI-build-tool" ]; then
+          echo "::error::未找到SGSI-build-tool目录"
+          ls -la
+          exit 1
+        fi
+        
+        # 进入工具目录
+        cd ./SGSI-build-tool
+        
+        # 验证Android 10构建目录
+        if [ ! -d "10" ]; then
+          echo "::error::缺少Android 10构建目录"
+          exit 1
+        fi
+        
+        # 准备安装脚本
+        if [ ! -f "../bin/setup.sh" ]; then
+          echo "::error::未找到setup.sh安装脚本"
+          exit 1
+        fi
+        rm -rf 10/setup.sh
+        mv ../bin/setup.sh 10/
+        
+        # 运行环境设置
+        cd 10
         bash setup.sh
         
-    - name: Download Rom
-      run: wget -c ${{ steps.var.outputs.rom_url }} -O SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
+    - name: 下载ROM
+      run: wget -c ${{ steps.var.outputs.rom_url }} -O ./SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
     
-    - name: Build Super SGSI
+    - name: 构建Super分区SGSI
       if: steps.var.outputs.make_super == 'true'
       run: |
-        sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
+        # 修改构建脚本为动态分区模式
+        sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' ./SGSI-build-tool/10/make.sh
     
-    - name: Make MIUI SGSI
+    - name: 生成MIUI SGSI
       if: steps.var.outputs.make_miui == 'true'
       run: |
-        rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        # 替换为MIUI修复脚本
+        rm -rf ./SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/MIUI.sh ./SGSI-build-tool/10/fixbug/fixbug.sh
         
-    - name: Make Flyme SGSI
+    - name: 生成Flyme SGSI
       if: steps.var.outputs.make_flyme == 'true'
       run: |
-        rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        # 替换为Flyme修复脚本
+        rm -rf ./SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/Flyme.sh ./SGSI-build-tool/10/fixbug/fixbug.sh
         
-    - name: Make ColorOS SGSI
+    - name: 生成ColorOS SGSI
       if: steps.var.outputs.make_coloros == 'true'
       run: |
-        python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
-        rm -rf SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        # 解密OPPO OZIP格式ROM
+        python3 ./SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py ./SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
+        # 替换为ColorOS修复脚本
+        rm -rf ./SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} ./SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/ColorOS.sh ./SGSI-build-tool/10/fixbug/fixbug.sh
         
-    - name: Make H2OS SGSI
+    - name: 生成H2OS SGSI
       if: steps.var.outputs.make_h2os == 'true'
       run: |
-        rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        # 替换为H2OS修复脚本
+        rm -rf ./SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/H2OS.sh ./SGSI-build-tool/10/fixbug/fixbug.sh
         
-    - name: Make SmartisanOS SGSI
+    - name: 生成SmartisanOS SGSI
       if: steps.var.outputs.make_smartisanos == 'true'
       run: |
-        rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        # 替换为SmartisanOS修复脚本
+        rm -rf ./SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/SmartisanOS.sh ./SGSI-build-tool/10/fixbug/fixbug.sh
         
-    - name: Make ZUI SGSI
+    - name: 生成ZUI SGSI
       if: steps.var.outputs.make_zui == 'true'
       run: |
-        rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        # 替换为ZUI修复脚本
+        rm -rf ./SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/ZUI.sh ./SGSI-build-tool/10/fixbug/fixbug.sh
          
-    - name: Generate SGSI
-      timeout-minutes: 120  # 防止无限挂起
+    - name: 生成SGSI镜像
+      timeout-minutes: 120  # 设置超时防止无限挂起
       run: |
-        rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
-        mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
-        mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
-        cd SGSI-build-tool/10
+        # 清理旧文件
+        rm -rf ./SGSI-build-tool/10/SGSI.sh ./SGSI-build-tool/10/makeimg.sh ./SGSI-build-tool/10/bin/mke2fs ./SGSI-build-tool/10/bin/e2fsdroid ./SGSI-build-tool/10/dynamic_SGSI.sh ./SGSI-build-tool/10/oppo.sh ./SGSI-build-tool/10/make.sh
+        
+        # 准备构建脚本
+        mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh ./SGSI-build-tool/10/
+        
+        # 准备工具文件
+        mv bin/mke2fs bin/e2fsdroid ./SGSI-build-tool/10/bin/
+        
+        # 执行构建
+        cd ./SGSI-build-tool/10
         bash make.sh
         
-    - name: Zip Patch  
+    - name: 打包补丁文件
       run: |
+        # 分别打包三个补丁目录
         zip -r Patch1.zip Patch/Patch1/*
         zip -r Patch2.zip Patch/Patch2/*
         zip -r Patch3.zip Patch/Patch3/*
-        mv Patch1.zip Patch2.zip Patch3.zip SGSI-build-tool/10/SGSI/
+        
+        # 移动补丁包到SGSI目录
+        mv Patch1.zip Patch2.zip Patch3.zip ./SGSI-build-tool/10/SGSI/
 
-    - name: zip SGSI
+    - name: 压缩SGSI成果物
       run: |
+        # 创建上传目录
         mkdir -p upload
-        zip -r ${{ steps.var.outputs.pack_sgsi }} SGSI-build-tool/10/SGSI/*
+        
+        # 打包SGSI文件
+        zip -r ${{ steps.var.outputs.pack_sgsi }} ./SGSI-build-tool/10/SGSI/*
+        
+        # 检查文件大小，大于2GB时分割打包
         if [[ $(du -sb ${{ steps.var.outputs.pack_sgsi }} | awk '{print $1}') -gt 2097152000 ]];then
-              echo -e "split packaging..."
+              echo "::notice::文件过大，进行分割打包..."
               tar -cpzf - ${{ steps.var.outputs.pack_sgsi }} | split -d -b 1024m - upload/${{ steps.var.outputs.pack_sgsi }}
           else
               mv ${{ steps.var.outputs.pack_sgsi }} upload/
           fi
+          
+          # 显示上传目录内容
           ls "upload"
           
-    - name: Upload SGSI to action-gh-release
+    - name: 发布SGSI版本
       uses: ncipollo/release-action@v1.8.6
       with:
-        artifacts: upload/*
-        name: xiaoxinSGSI-ab-Android10-unpack
-        tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}
-        token: ${{ secrets.GITHUB_TOKEN }}
+        artifacts: upload/*             # 上传所有打包文件
+        name: xiaoxinSGSI-ab-Android10-unpack  # 发布名称
+        tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}  # 自动生成版本标签
+        token: ${{ secrets.GITHUB_TOKEN }}  # 使用GitHub令牌认证
