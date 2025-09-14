@@ -7,9 +7,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      BUILD_TIME: ${{ steps.set_time.outputs.BUILD_TIME }}
-      
+    
     steps:
     - name: '📥 检出仓库'
       uses: actions/checkout@v4
@@ -92,13 +90,59 @@ jobs:
         unzip -q rom.zip -d out/
         echo "::endgroup::"
     
+    # ======= 新增的构建工具设置步骤 =======
+    - name: '⬇️ 下载构建工具'
+      run: |
+        echo "::group::⬇️ 下载构建工具"
+        # 使用curl静默下载
+        if command -v curl &> /dev/null; then
+          curl -sSL -o SGSI-build-tool.tar https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
+        else
+          wget -q -c https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
+        fi
+        
+        if [ ! -f SGSI-build-tool.tar ]; then
+          echo "::error::❌ 工具包下载失败"
+          exit 1
+        fi
+        echo "✅ 工具包下载成功"
+        echo "::endgroup::"
+        
+    - name: '⚙️ 设置构建环境'
+      run: |
+        echo "::group::⚙️ 设置构建环境"
+        tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
+        
+        if [ ! -d "SGSI-build-tool" ]; then
+          echo "::error::❌ 未找到SGSI-build-tool目录"
+          ls -la
+          exit 1
+        fi
+        
+        # 移除权限相关的命令
+        find SGSI-build-tool -type f -exec sed -i '/chown/d; /sudo/d' {} \;
+        
+        # 设置执行权限
+        find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
+        chmod +x SGSI-build-tool/10/bin/*
+        find SGSI-build-tool -type d -exec chmod 755 {} \;
+        
+        # 初始化环境
+        cd SGSI-build-tool/10
+        ./setup.sh || true
+        cd ../..
+        echo "✅ 构建环境设置完成"
+        echo "::endgroup::"
+    # ======= 新增步骤结束 =======
+    
     - name: '⚙️ 处理镜像'
       run: |
         echo "::group::⚙️ 处理镜像"
         # 这里添加实际的镜像处理逻辑
-        echo "1. 提取system.img文件"
-        echo "2. 删除不必要的应用和文件"
-        echo "3. 修改build.prop属性"
+        echo "1. 使用SGSI-build-tool处理镜像"
+        echo "2. 提取system.img文件"
+        echo "3. 删除不必要的应用和文件"
+        echo "4. 修改build.prop属性"
         echo "处理镜像完成"
         echo "::endgroup::"
 
@@ -408,4 +452,5 @@ jobs:
         rm -rf rom.zip
         rm -rf out/
         rm -rf upload/
+        rm -rf SGSI-build-tool*
         echo "::endgroup::"
