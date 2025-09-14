@@ -21,7 +21,6 @@ jobs:
     - name: "📝 读取配置文件"
       id: var
       run: |
-        # 从sgsi.json读取配置
         rom_url=$(jq -r '.rom_url' sgsi.json)
         rom_name=$(jq -r '.rom_name' sgsi.json)
         pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
@@ -33,7 +32,6 @@ jobs:
         make_zui=$(jq -r '.make_zui' sgsi.json)
         make_super=$(jq -r '.make_super' sgsi.json)
         
-        # 设置环境变量
         echo "rom_url=$rom_url" >> $GITHUB_ENV
         echo "rom_name=$rom_name" >> $GITHUB_ENV
         echo "pack_sgsi=$pack_sgsi" >> $GITHUB_ENV
@@ -47,7 +45,6 @@ jobs:
         
     - name: "⬇️ 下载构建工具"
       run: |
-        # 使用curl静默下载
         if command -v curl &> /dev/null; then
           curl -sSL -o SGSI-build-tool.tar https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
         else
@@ -69,11 +66,9 @@ jobs:
           exit 1
         fi
         
-        # 设置执行权限
         find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
         
-        # 初始化环境
         cd SGSI-build-tool/10
         ./setup.sh || true
         cd ../..
@@ -83,17 +78,14 @@ jobs:
         mkdir -p SGSI-build-tool/10/tmp
         rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
         
-        # 方法1: 使用curl下载
         if command -v curl &> /dev/null; then
           curl -L -k -sS -C - "${{ env.rom_url }}" -o "$rom_path" || true
         fi
         
-        # 方法2: 如果curl失败或未安装，使用wget
         if [ ! -f "$rom_path" ] && command -v wget &> /dev/null; then
           wget -q -c "${{ env.rom_url }}" -O "$rom_path" || true
         fi
         
-        # 检查是否下载成功
         if [ ! -f "$rom_path" ]; then
           echo "::error::❌ ROM文件下载失败"
           exit 1
@@ -109,54 +101,53 @@ jobs:
     
     - name: "🏭 生成厂商系统镜像"
       run: |
-        # 根据配置生成对应的厂商系统镜像
         if [ "${{ env.make_miui }}" = "true" ]; then
-          echo "⚙️ 配置MIUI构建 - 小米深度定制系统"
+          echo "⚙️ 配置MIUI构建"
           rm -f SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
           chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 小米MIUI配置完成 | 特色: 小爱同学、MIUI优化"
+          echo "✅ 小米MIUI配置文件已应用"
         fi
         
         if [ "${{ env.make_flyme }}" = "true" ]; then
-          echo "⚙️ 配置Flyme构建 - 魅族标志性系统"
+          echo "⚙️ 配置Flyme构建"
           rm -f SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
           chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 魅族Flyme配置完成 | 特色: mBack交互、小窗模式"
+          echo "✅ 魅族Flyme配置文件已应用"
         fi
         
         if [ "${{ env.make_coloros }}" = "true" ]; then
-          echo "⚙️ 配置ColorOS构建 - OPPO & realme 共享系统平台"
+          echo "⚙️ 配置ColorOS构建"
           python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ env.rom_name }}
           rm -f SGSI-build-tool/10/tmp/${{ env.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
           chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ OPPO/realme ColorOS配置完成 | 特色: 闪回键、AI美颜、游戏空间"
+          echo "✅ OPPO/realme ColorOS配置文件已应用"
         fi
         
         if [ "${{ env.make_h2os }}" = "true" ]; then
-          echo "⚙️ 配置HydrogenOS构建 - 一加海外版轻量化系统"
+          echo "⚙️ 配置HydrogenOS构建"
           rm -f SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
           chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 一加HydrogenOS配置完成 | 特色: 类原生体验、流畅稳定"
+          echo "✅ 一加HydrogenOS配置文件已应用"
         fi
         
         if [ "${{ env.make_smartisanos }}" = "true" ]; then
-          echo "⚙️ 配置SmartisanOS构建 - 锤子科技匠心系统"
+          echo "⚙️ 配置SmartisanOS构建"
           rm -f SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
           chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 锤子SmartisanOS配置完成 | 特色: 大爆炸、一步功能"
+          echo "✅ 锤子SmartisanOS配置文件已应用"
         fi
         
         if [ "${{ env.make_zui }}" = "true" ]; then
-          echo "⚙️ 配置ZUI构建 - 联想多设备协同系统"
+          echo "⚙️ 配置ZUI构建"
           rm -f SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
           chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 联想ZUI配置完成 | 特色: U-Touch手势、电脑模式"
+          echo "✅ 联想ZUI配置文件已应用"
         fi
         
         if [ "${{ env.make_miui }}" != "true" ] && \
@@ -171,42 +162,30 @@ jobs:
     - name: "🔨 构建SGSI系统镜像"
       timeout-minutes: 120
       run: |
-        # 准备构建环境
         rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
         mv make/* SGSI-build-tool/10/
         mv bin/* SGSI-build-tool/10/bin/
         
-        # 设置执行权限
         find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
         
-        # 创建输出目录结构
         cd SGSI-build-tool/10
         mkdir -p out/{system,config}
         mkdir -p out/system/{bin,etc,lib,usr,framework,app,priv-app,vendor}
         
-        # 创建默认配置文件
         echo -e "# 默认文件上下文\n/system(/.*)? u:object_r:system_file:s0\n/vendor(/.*)? u:object_r:vendor_file:s0" > out/config/system_file_contexts
         echo -e "# 默认文件系统配置\n/system 0 0 755\n/vendor 0 0 755" > out/config/system_fs_config
         
-        # 执行构建
         echo "::group::📜 构建日志"
         build_output=$(./make.sh 2>&1 || true)
         echo "$build_output"
         
-        # 检测Android版本信息
-        if echo "$build_output" | grep -q "Android Nougat 7.x / Oreo 8.x detected"; then
-          echo "🔄 检测到Android 7.x/8.x ROM（ext4格式），正在转换系统镜像..."
-        fi
-        
-        # 检查转换错误
         if echo "$build_output" | grep -q "sdat2img: failed"; then
           echo "::error::❌ sdat2img转换失败"
           exit 1
         fi
         echo "::endgroup::"
         
-        # 验证构建结果
         if [ ! -f "out/system.img" ]; then
           echo "::warning::⚠️ system.img未生成，尝试手动创建"
           
@@ -215,9 +194,8 @@ jobs:
             exit 1
           fi
           
-          # 计算镜像大小
           size_kb=$(du -sk out/system/ | cut -f1)
-          img_size_kb=$((size_kb * 130 / 100))  # +30%
+          img_size_kb=$((size_kb * 130 / 100))
           img_size_mb=$((img_size_kb / 1024))
           [ $img_size_mb -lt 512 ] && img_size_mb=512
           
@@ -231,10 +209,9 @@ jobs:
           fi
         fi
         
-        # 移动生成的文件
         mkdir -p SGSI
         mv out/system.img SGSI/
-        cd ../../
+        cd ../..
         
     - name: "📦 打包系统补丁"
       run: |
@@ -250,26 +227,18 @@ jobs:
     - name: "📦 创建最终包"
       run: |
         echo "::group::📦 创建最终包"
-        # 确保SGSI目录存在
         mkdir -p SGSI-build-tool/10/SGSI
         
-        # 检查目录内容
-        ls -lh SGSI-build-tool/10/SGSI/
-        
-        # 确保有文件存在
         if [ -z "$(ls -A SGSI-build-tool/10/SGSI/* 2>/dev/null)" ]; then
           echo "::error::❌ SGSI目录为空，无法创建压缩包"
           exit 1
         fi
         
-        # 创建压缩包
         pack_name="${{ env.pack_sgsi }}"
         zip -r -0 "$pack_name" SGSI-build-tool/10/SGSI/*
         
-        # 检查压缩包
         if [ ! -f "$pack_name" ]; then
           echo "::error::❌ 压缩包创建失败: $pack_name"
-          ls -lh
           exit 1
         fi
         
@@ -287,143 +256,178 @@ jobs:
         echo "::group::📤 准备上传文件"
         pack_name="${{ env.pack_sgsi }}"
         
-        # 确保压缩包存在
         if [ ! -f "$pack_name" ]; then
           echo "::error::❌ 最终压缩包不存在: $pack_name"
-          ls -lh
           exit 1
         fi
         
-        # 创建上传目录
         mkdir -p upload
-        echo "📁 上传目录路径: $(pwd)/upload"
-        
-        # 检查文件大小
         file_size=$(stat -c%s "$pack_name")
-        max_size=1900000000  # 1.9GB (GitHub Releases最大支持2GB文件)
+        max_size=1900000000
         
-        echo "📦 压缩包大小: $(numfmt --to=iec $file_size)"
+        echo "FILE_SIZE=$file_size" >> $GITHUB_ENV
         
-        # 设置分割标志
         split_needed=false
         
         if [ $file_size -gt $max_size ]; then
           echo "✂️ 文件过大，进行分割..."
           split_needed=true
-          
-          # 计算分割大小 (1.8GB)，确保每个文件小于2GB限制
-          split_size=1800m
-          
-          # 分割文件
-          split -b $split_size -d "$pack_name" "upload/${pack_name}_part"
-          
-          echo "✅ 分割完成，上传目录内容:"
-          ls -lh upload/
+          split -b 1800m -d "$pack_name" "upload/${pack_name}_part"
         else
-          echo "➡️ 移动单个压缩包到upload目录"
           mv -v "$pack_name" upload/
-          
-          echo "📋 上传目录内容:"
-          ls -lh upload/
         fi
         
-        # 保存分割标志到环境变量
         echo "SPLIT_NEEDED=$split_needed" >> $GITHUB_ENV
         echo "::endgroup::"
         
     - name: "🔍 验证上传文件"
       run: |
         echo "::group::🔍 验证上传文件"
-        # 检查上传目录是否存在
-        if [ ! -d "upload" ]; then
-          echo "::error::❌ 上传目录不存在"
-          exit 1
-        fi
-        
-        # 检查是否有文件
-        if [ -z "$(ls -A upload)" ]; then
-          echo "::error::❌ 上传目录为空!"
+        if [ ! -d "upload" ] || [ -z "$(ls -A upload)" ]; then
+          echo "::error::❌ 上传文件验证失败"
           exit 1
         else
-          file_count=$(ls upload | wc -l)
-          echo "✅ 上传文件验证通过 ($file_count 个文件):"
+          echo "✅ 上传文件验证通过"
           ls -lh upload
         fi
         echo "::endgroup::"
+        
+    - name: "📝 生成发布说明"
+      run: |
+        # 自动检测版本信息函数
+        detect_version() {
+          local system_dir="SGSI-build-tool/10/out/system"
+          local version_info=""
           
+          # 检测MIUI版本
+          if [ "${{ env.make_miui }}" = "true" ]; then
+            if [ -f "$system_dir/system/build.prop" ]; then
+              miui_ver=$(grep -E 'ro.miui.ui.version.name|ro.miui.ui.version.code' $system_dir/system/build.prop | head -1 | cut -d= -f2)
+              miui_type=$(grep 'ro.miui.ui.version.type' $system_dir/system/build.prop | cut -d= -f2)
+              [ -z "$miui_type" ] && miui_type="稳定版"  # 默认为稳定版
+              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
+              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
+              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
+              
+              version_info+="- MIUI$miui_ver [$miui_type] + Android $android_ver\n"
+              version_info+="  - 构建日期: $build_date\n"
+              version_info+="  - 安全补丁: $security_patch\n"
+            else
+              version_info+="- MIUI [自动检测失败]\n"
+            fi
+          fi
+          
+          # 检测Flyme版本
+          if [ "${{ env.make_flyme }}" = "true" ]; then
+            if [ -f "$system_dir/system/build.prop" ]; then
+              flyme_ver=$(grep 'ro.build.display.id' $system_dir/system/build.prop | cut -d= -f2 | sed 's/Flyme //')
+              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
+              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
+              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
+              
+              version_info+="- Flyme$flyme_ver + Android $android_ver\n"
+              version_info+="  - 构建日期: $build_date\n"
+              version_info+="  - 安全补丁: $security_patch\n"
+            else
+              version_info+="- Flyme [自动检测失败]\n"
+            fi
+          fi
+          
+          # 检测ColorOS版本
+          if [ "${{ env.make_coloros }}" = "true" ]; then
+            if [ -f "$system_dir/system/build.prop" ]; then
+              coloros_ver=$(grep 'ro.rom.version' $system_dir/system/build.prop | cut -d= -f2)
+              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
+              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
+              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
+              
+              version_info+="- ColorOS$coloros_ver + Android $android_ver\n"
+              version_info+="  - 构建日期: $build_date\n"
+              version_info+="  - 安全补丁: $security_patch\n"
+            else
+              version_info+="- ColorOS [自动检测失败]\n"
+            fi
+          fi
+          
+          # 检测HydrogenOS版本
+          if [ "${{ env.make_h2os }}" = "true" ]; then
+            if [ -f "$system_dir/system/build.prop" ]; then
+              h2os_ver=$(grep 'ro.rom.version' $system_dir/system/build.prop | cut -d= -f2)
+              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
+              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
+              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
+              
+              version_info+="- HydrogenOS$h2os_ver + Android $android_ver\n"
+              version_info+="  - 构建日期: $build_date\n"
+              version_info+="  - 安全补丁: $security_patch\n"
+            else
+              version_info+="- HydrogenOS [自动检测失败]\n"
+            fi
+          fi
+          
+          # 检测SmartisanOS版本
+          if [ "${{ env.make_smartisanos }}" = "true" ]; then
+            if [ -f "$system_dir/system/build.prop" ]; then
+              smartisan_ver=$(grep 'ro.smartisan.version' $system_dir/system/build.prop | cut -d= -f2)
+              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
+              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
+              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
+              
+              version_info+="- SmartisanOS$smartisan_ver + Android $android_ver\n"
+              version_info+="  - 构建日期: $build_date\n"
+              version_info+="  - 安全补丁: $security_patch\n"
+            else
+              version_info+="- SmartisanOS [自动检测失败]\n"
+            fi
+          fi
+          
+          # 检测ZUI版本
+          if [ "${{ env.make_zui }}" = "true" ]; then
+            if [ -f "$system_dir/system/build.prop" ]; then
+              zui_ver=$(grep 'ro.zui.version' $system_dir/system/build.prop | cut -d= -f2)
+              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
+              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
+              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
+              
+              version_info+="- ZUI$zui_ver + Android $android_ver\n"
+              version_info+="  - 构建日期: $build_date\n"
+              version_info+="  - 安全补丁: $security_patch\n"
+            else
+              version_info+="- ZUI [自动检测失败]\n"
+            fi
+          fi
+          
+          # 如果没有配置任何系统，添加提示
+          if [ -z "$version_info" ]; then
+            version_info="⚠️ 未配置任何厂商系统镜像生成"
+          fi
+          
+          echo -e "$version_info"
+        }
+        
+        # 创建发布说明文件
+        echo "## 🌟 SGSI镜像构建成功" > release_body.md
+        echo "" >> release_body.md
+        echo "### 📋 构建详情" >> release_body.md
+        echo "- **源ROM**: ${{ env.rom_name }}" >> release_body.md
+        echo "- **构建时间**: ${{ env.BUILD_TIME }}" >> release_body.md
+        echo "- **文件大小**: $(numfmt --to=iec ${{ env.FILE_SIZE }})" >> release_body.md
+        echo "- **构建日志**: [${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}]" >> release_body.md
+        echo "" >> release_body.md
+        echo "### ⚙️ 系统配置" >> release_body.md
+        detect_version >> release_body.md
+        echo "" >> release_body.md
+        echo "> **注意**: 请确保下载所有文件（如果被分割）" >> release_body.md
+        
+        echo "生成发布说明:"
+        cat release_body.md
+        
     - name: "🚀 发布SGSI成品"
       if: success()
       uses: softprops/action-gh-release@v1
       with:
         files: upload/*
         tag_name: "sgs-img-${{ env.BUILD_TIME }}"
-        body: |
-          ##  🌟 SGSI镜像构建成功
-          
-          ###   📋 构建详情
-          - **源ROM**: ${{ env.rom_name }}
-          - **构建时间**: ${{ steps.timestamp.outputs.time }}
-          - **文件大小**: $(numfmt --to=iec $file_size)
-          ${{ env.SPLIT_NEEDED == 'true' && '- **文件状态**: 已分割为多个部分' || '- **文件状态**: 单个文件' }}
-          - **构建日志**: [查看详情](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          
-          ##  📦 解压指南
-          ${{ env.SPLIT_NEEDED == 'true' && '###   ✂️ 分割文件解压方法：' || '###  📄 单文件解压方法：' }}
-          
-          ${{ env.SPLIT_NEEDED == 'true' && '####   💻 电脑端（Windows/Linux/macOS）：
-          **推荐软件**: 
-          - 7-Zip (Windows) https://www.7-zip.org/
-          - The Unarchiver (macOS) https://theunarchiver.com/
-          - PeaZip (跨平台) https://peazip.github.io/
-          
-          操作步骤：
-          1. 下载所有 `' + env.pack_sgsi + '_part*` 文件到同一目录
-          2. 打开终端/命令提示符，进入该目录
-          3. 执行合并命令：
-          ```bash
-          # Windows:
-          copy /B ' + env.pack_sgsi + '_part* ' + env.pack_sgsi + '
-          
-          # Linux/macOS:
-          cat ' + env.pack_sgsi + '_part* > ' + env.pack_sgsi + '
-          ```
-          4. 使用推荐软件解压合并后的文件
-          
-          ####  📱 手机端（Android）：
-          **推荐应用**: 
-          - ZArchiver Pro (专业版支持分割文件合并) https://play.google.com/store/apps/details?id=ru.zdevs.zarchiver.pro
-          - RAR https://play.google.com/store/apps/details?id=com.rarlab.rar
-          
-          操作步骤：
-          1. 安装ZArchiver Pro
-          2. 下载所有分割文件到同一目录
-          3. 打开ZArchiver → 找到分割文件目录
-          4. 长按第一个文件(`' + env.pack_sgsi + '_part00`) → 解压 → 自动合并所有部分
-          5. 解压生成的完整ZIP文件' || '####  💻 电脑端：
-          **推荐软件**: 
-          - Bandizip (Windows) https://www.bandisoft.com/bandizip/
-          - Keka (macOS) https://www.keka.io/
-          - p7zip (Linux) https://www.7-zip.org/
-          
-          操作步骤：
-          1. 下载安装推荐软件
-          2. 右键点击ZIP文件 → 选择"解压到当前文件夹"
-          或使用命令行: 
-          ```bash
-          unzip ' + env.pack_sgsi + '
-          ```
-          
-          ####  📱 手机端：
-          **推荐应用**: 
-          - ZArchiver https://play.google.com/store/apps/details?id=ru.zdevs.zarchiver
-          - RAR for Android https://play.google.com/store/apps/details?id=com.rarlab.rar
-          
-          操作步骤：
-          1. 安装推荐应用
-          2. 找到下载的ZIP文件
-          3. 长按文件 → 解压 → 选择目标目录' }}
-          
-          > **注意**: 解压后请仔细阅读压缩包内的README文件获取刷机说明
-          > **提示**: 如果遇到解压问题，请确保下载了所有部分（分割文件）
+        body_file: release_body.md
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
