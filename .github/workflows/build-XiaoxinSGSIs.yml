@@ -284,6 +284,69 @@ jobs:
         # 准备最终输出
         mkdir -p SGSI
         mv -v out/system.img SGSI/
+        
+        # 保存系统信息
+        echo "::group::📋 提取系统信息"
+        if [ -d "out/system" ]; then
+          # 尝试查找build.prop文件
+          build_prop_path=$(find out/system -name "build.prop" -print -quit 2>/dev/null)
+          
+          if [ -n "$build_prop_path" ]; then
+            echo "✅ 找到build.prop文件: $build_prop_path"
+            
+            # 提取关键系统信息
+            android_version=$(grep -m1 "ro.build.version.release" "$build_prop_path" | cut -d= -f2)
+            build_date=$(grep -m1 "ro.build.date" "$build_prop_path" | cut -d= -f2)
+            security_patch=$(grep -m1 "ro.build.version.security_patch" "$build_prop_path" | cut -d= -f2)
+            build_id=$(grep -m1 "ro.build.id" "$build_prop_path" | cut -d= -f2)
+            
+            # 根据系统类型提取特定信息
+            if [ "${{ env.make_miui }}" = "true" ]; then
+              miui_version=$(grep -m1 "ro.miui.ui.version.name" "$build_prop_path" | cut -d= -f2)
+              echo "MIUI_VERSION=$miui_version" >> $GITHUB_ENV
+            fi
+            
+            if [ "${{ env.make_flyme }}" = "true" ]; then
+              flyme_version=$(grep -m1 "ro.build.display.id" "$build_prop_path" | cut -d= -f2 | sed 's/Flyme //')
+              echo "FLYME_VERSION=$flyme_version" >> $GITHUB_ENV
+            fi
+            
+            if [ "${{ env.make_coloros }}" = "true" ]; then
+              coloros_version=$(grep -m1 "ro.rom.version" "$build_prop_path" | cut -d= -f2)
+              echo "COLOROS_VERSION=$coloros_version" >> $GITHUB_ENV
+            fi
+            
+            # 保存到环境变量
+            echo "ANDROID_VERSION=$android_version" >> $GITHUB_ENV
+            echo "BUILD_DATE=$build_date" >> $GITHUB_ENV
+            echo "SECURITY_PATCH=$security_patch" >> $GITHUB_ENV
+            echo "BUILD_ID=$build_id" >> $GITHUB_ENV
+            
+            # 打印提取的信息
+            echo "Android 版本: $android_version"
+            echo "构建日期: $build_date"
+            echo "安全补丁: $security_patch"
+            echo "构建ID: $build_id"
+            
+            if [ -n "$miui_version" ]; then echo "MIUI 版本: $miui_version"; fi
+            if [ -n "$flyme_version" ]; then echo "Flyme 版本: $flyme_version"; fi
+            if [ -n "$coloros_version" ]; then echo "ColorOS 版本: $coloros_version"; fi
+          else
+            echo "⚠️ 未找到build.prop文件"
+            echo "ANDROID_VERSION=未知" >> $GITHUB_ENV
+            echo "BUILD_DATE=未知" >> $GITHUB_ENV
+            echo "SECURITY_PATCH=未知" >> $GITHUB_ENV
+            echo "BUILD_ID=未知" >> $GITHUB_ENV
+          fi
+        else
+          echo "::warning::⚠️ out/system目录不存在，无法提取系统信息"
+          echo "ANDROID_VERSION=未知" >> $GITHUB_ENV
+          echo "BUILD_DATE=未知" >> $GITHUB_ENV
+          echo "SECURITY_PATCH=未知" >> $GITHUB_ENV
+          echo "BUILD_ID=未知" >> $GITHUB_ENV
+        fi
+        echo "::endgroup::"
+        
         cd ../..
         
         echo "🔄 清理中间文件释放磁盘空间..."
@@ -371,117 +434,6 @@ jobs:
         
     - name: "📝 生成发布说明"
       run: |
-        # 自动检测版本信息函数
-        detect_version() {
-          local system_dir="SGSI-build-tool/10/out/system"
-          local version_info=""
-          
-          # 检测MIUI版本
-          if [ "${{ env.make_miui }}" = "true" ]; then
-            if [ -f "$system_dir/system/build.prop" ]; then
-              miui_ver=$(grep -E 'ro.miui.ui.version.name|ro.miui.ui.version.code' $system_dir/system/build.prop | head -1 | cut -d= -f2)
-              miui_type=$(grep 'ro.miui.ui.version.type' $system_dir/system/build.prop | cut -d= -f2)
-              [ -z "$miui_type" ] && miui_type="稳定版"  # 默认为稳定版
-              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
-              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
-              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
-              
-              version_info+="- MIUI$miui_ver [$miui_type] + Android $android_ver\n"
-              version_info+="  - 构建日期: $build_date\n"
-              version_info+="  - 安全补丁: $security_patch\n"
-            else
-              version_info+="- MIUI [自动检测失败]\n"
-            fi
-          fi
-          
-          # 检测Flyme版本
-          if [ "${{ env.make_flyme }}" = "true" ]; then
-            if [ -f "$system_dir/system/build.prop" ]; then
-              flyme_ver=$(grep 'ro.build.display.id' $system_dir/system/build.prop | cut -d= -f2 | sed 's/Flyme //')
-              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
-              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
-              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
-              
-              version_info+="- Flyme$flyme_ver + Android $android_ver\n"
-              version_info+="  - 构建日期: $build_date\n"
-              version_info+="  - 安全补丁: $security_patch\n"
-            else
-              version_info+="- Flyme [自动检测失败]\n"
-            fi
-          fi
-          
-          # 检测ColorOS版本
-          if [ "${{ env.make_coloros }}" = "true" ]; then
-            if [ -f "$system_dir/system/build.prop" ]; then
-              coloros_ver=$(grep 'ro.rom.version' $system_dir/system/build.prop | cut -d= -f2)
-              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
-              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
-              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
-              
-              version_info+="- ColorOS$coloros_ver + Android $android_ver\n"
-              version_info+="  - 构建日期: $build_date\n"
-              version_info+="  - 安全补丁: $security_patch\n"
-            else
-              version_info+="- ColorOS [自动检测失败]\n"
-            fi
-          fi
-          
-          # 检测HydrogenOS版本
-          if [ "${{ env.make_h2os }}" = "true" ]; then
-            if [ -f "$system_dir/system/build.prop" ]; then
-              h2os_ver=$(grep 'ro.rom.version' $system_dir/system/build.prop | cut -d= -f2)
-              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
-              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
-              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
-              
-              version_info+="- HydrogenOS$h2os_ver + Android $android_ver\n"
-              version_info+="  - 构建日期: $build_date\n"
-              version_info+="  - 安全补丁: $security_patch\n"
-            else
-              version_info+="- HydrogenOS [自动检测失败]\n"
-            fi
-          fi
-          
-          # 检测SmartisanOS版本
-          if [ "${{ env.make_smartisanos }}" = "true" ]; then
-            if [ -f "$system_dir/system/build.prop" ]; then
-              smartisan_ver=$(grep 'ro.smartisan.version' $system_dir/system/build.prop | cut -d= -f2)
-              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
-              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
-              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
-              
-              version_info+="- SmartisanOS$smartisan_ver + Android $android_ver\n"
-              version_info+="  - 构建日期: $build_date\n"
-              version_info+="  - 安全补丁: $security_patch\n"
-            else
-              version_info+="- SmartisanOS [自动检测失败]\n"
-            fi
-          fi
-          
-          # 检测ZUI版本
-          if [ "${{ env.make_zui }}" = "true" ]; then
-            if [ -f "$system_dir/system/build.prop" ]; then
-              zui_ver=$(grep 'ro.zui.version' $system_dir/system/build.prop | cut -d= -f2)
-              android_ver=$(grep 'ro.build.version.release' $system_dir/system/build.prop | cut -d= -f2)
-              build_date=$(grep 'ro.build.date' $system_dir/system/build.prop | cut -d= -f2)
-              security_patch=$(grep 'ro.build.version.security_patch' $system_dir/system/build.prop | cut -d= -f2)
-              
-              version_info+="- ZUI$zui_ver + Android $android_ver\n"
-              version_info+="  - 构建日期: $build_date\n"
-              version_info+="  - 安全补丁: $security_patch\n"
-            else
-              version_info+="- ZUI [自动检测失败]\n"
-            fi
-          fi
-          
-          # 如果没有配置任何系统，添加提示
-          if [ -z "$version_info" ]; then
-            version_info="⚠️ 未配置任何厂商系统镜像生成"
-          fi
-          
-          echo -e "$version_info"
-        }
-        
         # 创建发布说明文件
         echo "## 🌟 SGSI镜像构建成功" > release_body.md
         echo "" >> release_body.md
@@ -491,8 +443,44 @@ jobs:
         echo "- **文件大小**: $(numfmt --to=iec ${{ env.FILE_SIZE }})" >> release_body.md
         echo "- **构建日志**: [${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}]" >> release_body.md
         echo "" >> release_body.md
-        echo "###  ⚙️ 系统配置" >> release_body.md
-        detect_version >> release_body.md
+        echo "### ⚙️ 系统信息" >> release_body.md
+        
+        # 系统版本信息
+        if [ "${{ env.make_miui }}" = "true" ]; then
+          echo "- **MIUI 版本**: ${{ env.MIUI_VERSION }}" >> release_body.md
+        fi
+        
+        if [ "${{ env.make_flyme }}" = "true" ]; then
+          echo "- **Flyme 版本**: ${{ env.FLYME_VERSION }}" >> release_body.md
+        fi
+        
+        if [ "${{ env.make_coloros }}" = "true" ]; then
+          echo "- **ColorOS 版本**: ${{ env.COLOROS_VERSION }}" >> release_body.md
+        fi
+        
+        if [ "${{ env.make_h2os }}" = "true" ]; then
+          echo "- **HydrogenOS 版本**: ${{ env.COLOROS_VERSION }}" >> release_body.md
+        fi
+        
+        # 通用Android信息
+        echo "- **Android 版本**: ${{ env.ANDROID_VERSION }}" >> release_body.md
+        echo "- **安全补丁**: ${{ env.SECURITY_PATCH }}" >> release_body.md
+        echo "- **构建日期**: ${{ env.BUILD_DATE }}" >> release_body.md
+        echo "- **构建ID**: ${{ env.BUILD_ID }}" >> release_body.md
+        echo "" >> release_body.md
+        
+        # 文件下载说明
+        if [ "${{ env.SPLIT_NEEDED }}" = "true" ]; then
+          echo "### ⚠️ 下载说明" >> release_body.md
+          echo "文件过大已被分割，请下载所有分卷文件后使用以下命令合并：" >> release_body.md
+          echo '```bash' >> release_body.md
+          echo "cat ${pack_name}_part* > ${{ env.pack_sgsi }}" >> release_body.md
+          echo '```' >> release_body.md
+        else
+          echo "### ⬇️ 下载说明" >> release_body.md
+          echo "直接下载压缩包文件即可" >> release_body.md
+        fi
+        
         echo "" >> release_body.md
         echo "> **注意**: 请确保下载所有文件（如果被分割）" >> release_body.md
         
