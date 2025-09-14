@@ -21,7 +21,7 @@ jobs:
     - name: 读取配置文件
       id: var
       run: |
-        # 使用新的环境文件方式设置输出变量
+        # 从sgsi.json读取配置
         rom_url=$(jq -r '.rom_url' sgsi.json)
         rom_name=$(jq -r '.rom_name' sgsi.json)
         pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
@@ -47,7 +47,13 @@ jobs:
         
     - name: 下载构建工具
       run: |
-        wget -c https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
+        # 使用curl静默下载
+        if command -v curl &> /dev/null; then
+          curl -sSL -o SGSI-build-tool.tar https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
+        else
+          wget -q -c https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
+        fi
+        
         if [ ! -f SGSI-build-tool.tar ]; then
           echo "::error::工具包下载失败"
           exit 1
@@ -76,20 +82,35 @@ jobs:
         ./setup.sh || true
         cd ../..
         
-    - name: 下载ROM文件
+    - name: 下载ROM文件 (多方式静默下载)
       run: |
         mkdir -p SGSI-build-tool/10/tmp
-        # 使用-q参数进行静默下载
-        wget -q -c "${{ env.rom_url }}" -O "SGSI-build-tool/10/tmp/${{ env.rom_name }}"
+        rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
         
-        if [ ! -f "SGSI-build-tool/10/tmp/${{ env.rom_name }}" ]; then
+        echo "正在下载ROM文件: ${{ env.rom_name }}"
+        
+        # 方法1: 使用curl静默下载
+        if command -v curl &> /dev/null; then
+          echo "使用curl下载..."
+          curl -L -k -sS -C - "${{ env.rom_url }}" -o "$rom_path" && download_success=true || curl_ret=$?
+        fi
+        
+        # 方法2: 如果curl失败或未安装，使用wget
+        if [ ! -f "$rom_path" ] && command -v wget &> /dev/null; then
+          echo "使用wget下载..."
+          wget -q -c "${{ env.rom_url }}" -O "$rom_path" && download_success=true || wget_ret=$?
+        fi
+        
+        # 检查是否下载成功
+        if [ ! -f "$rom_path" ]; then
           echo "::error::ROM文件下载失败"
-          # 尝试重新下载一次并显示错误信息
-          wget -c "${{ env.rom_url }}" -O "SGSI-build-tool/10/tmp/${{ env.rom_name }}" || true
+          echo "curl退出码: ${curl_ret:-未使用}"
+          echo "wget退出码: ${wget_ret:-未使用}"
           exit 1
         else
-          echo "ROM文件已成功下载（静默模式）"
-          echo "文件大小: $(du -sh SGSI-build-tool/10/tmp/${{ env.rom_name }} | cut -f1)"
+          echo "ROM文件下载成功"
+          echo "文件大小: $(du -sh "$rom_path" | cut -f1)"
+          echo "下载方式: ${download_success:+${curl_ret+curl}${wget_ret+wget}}"
         fi
     
     - name: 启用Super分区支持
@@ -140,9 +161,9 @@ jobs:
         chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
          
     - name: 构建SGSI系统镜像
-      timeout-minutes: 180
+      timeout-minutes: 120
       run: |
-        # 准备构建脚本
+        # 准备构建环境
         rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
         mv make/* SGSI-build-tool/10/
         mv bin/* SGSI-build-tool/10/bin/
@@ -163,131 +184,159 @@ jobs:
         echo -e "# 默认文件上下文\n/system(/.*)? u:object_r:system_file:s0\n/vendor(/.*)? u:object_r:vendor_file:s0" > out/config/system_file_contexts
         echo -e "# 默认文件系统配置\n/system 0 0 755\n/vendor 0 0 755" > out/config/system_fs_config
         
-        # 执行构建
-        echo "开始构建SGSI镜像..."
-        ./make.sh || true
-        echo "构建完成"
+        # 执行构建并处理sdat2img输出
+        echo "::group::构建日志"
+        build_output=$(./make.sh 2>&1 || true)
+        echo "$build_output"
+        
+        # 检测Android版本信息 - 专注ext4格式转换
+        if echo "$build_output" | grep -q "Android Nougat 7.x / Oreo 8.x detected"; then
+          echo "::notice::检测到Android 7.x/8.x ROM（ext4格式），正在转换系统镜像..."
+        fi
+        
+        # 检查转换错误
+        if echo "$build_output" | grep -q "sdat2img: failed"; then
+          echo "::error::sdat2img转换失败"
+          exit 1
+        fi
+        echo "::endgroup::"
         
         # 验证构建结果
         if [ ! -f "out/system.img" ]; then
           echo "::warning::system.img未生成，尝试手动创建"
           
-          # 计算所需镜像大小（目录大小 + 30%）
-          size_kb=$(du -sk out/system/ | cut -f1)
-          img_size_kb=$((size_kb + (size_kb * 30 / 100)))
-          img_size_mb=$((img_size_kb / 1024))
-          
-          # 确保最小512MB
-          if [ $img_size_mb -lt 512 ]; then
-            img_size_mb=512
+          if [ ! -d "out/system" ]; then
+            echo "::error::out/system目录不存在，无法创建镜像"
+            exit 1
           fi
           
-          echo "估算目录大小: ${size_kb}KB, 设置镜像大小: ${img_size_mb}MB"
+          # 计算镜像大小
+          size_kb=$(du -sk out/system/ | cut -f1)
+          img_size_kb=$((size_kb * 130 / 100))  # +30%
+          img_size_mb=$((img_size_kb / 1024))
+          [ $img_size_mb -lt 512 ] && img_size_mb=512
           
-          # 创建镜像文件
+          echo "创建 ${img_size_mb}MB 镜像"
           ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 out/system.img ${img_size_mb}M
+          ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config -S out/config/system_file_contexts -f out/system/ -a /system out/system.img
           
-          # 填充镜像
-          ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config \
-            -S out/config/system_file_contexts -f out/system/ -a /system out/system.img || true
-            
           if [ ! -f "out/system.img" ]; then
             echo "::error::无法生成system.img"
             exit 1
-          else
-            echo "手动创建的system.img大小: $(du -sh out/system.img)"
           fi
-        else
-          echo "自动生成的system.img大小: $(du -sh out/system.img)"
         fi
         
         # 移动生成的文件
         mkdir -p SGSI
         mv out/system.img SGSI/
-        echo "SGSI目录内容:"
-        ls -lh SGSI
+        cd ../../../
         
     - name: 打包系统补丁
       run: |
         for i in 1 2 3; do
-          echo "打包补丁 Patch$i"
           if [ -d "Patch/Patch$i" ]; then
+            echo "打包补丁 Patch$i"
             zip -r -0 "Patch$i.zip" "Patch/Patch$i"/*
+            mkdir -p SGSI-build-tool/10/SGSI
             mv "Patch$i.zip" SGSI-build-tool/10/SGSI/
-          else
-            echo "::warning::Patch/Patch$i 目录不存在，跳过"
           fi
         done
 
-    - name: 打包并准备上传SGSI镜像
+    - name: 创建最终包
       run: |
-        # 确保上传目录存在（使用绝对路径）
-        mkdir -p "$GITHUB_WORKSPACE/upload"
+        echo "::group::创建最终包"
+        # 确保SGSI目录存在
+        mkdir -p SGSI-build-tool/10/SGSI
         
-        # 进入SGSI输出目录
+        # 进入SGSI目录
         cd SGSI-build-tool/10/SGSI
         
         # 检查目录内容
         echo "SGSI目录内容:"
         ls -lh
         
-        echo "::group::打包SGSI镜像"
-        # 创建完整压缩包
+        # 确保有文件存在
+        if [ -z "$(ls -A .)" ]; then
+          echo "::error::SGSI目录为空，无法创建压缩包"
+          exit 1
+        fi
+        
+        # 创建压缩包
         pack_name="${{ env.pack_sgsi }}"
-        echo "正在创建压缩包: $pack_name"
+        echo "创建压缩包: $pack_name"
         zip -r -0 "../../../../$pack_name" .
-        echo "压缩包创建完成"
+        
+        # 检查压缩包
+        if [ ! -f "../../../../$pack_name" ]; then
+          echo "::error::压缩包创建失败: $pack_name"
+          exit 1
+        fi
+        
+        echo "压缩包大小: $(du -sh "../../../../$pack_name" | cut -f1)"
         echo "::endgroup::"
         
         # 返回工作目录
         cd ../../../../
         
-        # 检查文件是否存在
+    - name: 准备上传文件
+      run: |
+        echo "::group::准备上传文件"
+        pack_name="${{ env.pack_sgsi }}"
+        
+        # 确保压缩包存在
         if [ ! -f "$pack_name" ]; then
-          echo "::error::压缩包 $pack_name 未创建"
+          echo "::error::最终压缩包不存在: $pack_name"
           exit 1
         fi
         
-        # 确保上传目录存在
+        # 创建上传目录
         mkdir -p upload
-        echo "当前工作目录: $(pwd)"
-        echo "目录内容:"
-        ls -l
+        echo "上传目录路径: $(pwd)/upload"
         
         # 检查文件大小
-        max_size=2000000000  # 2GB
         file_size=$(stat -c%s "$pack_name")
+        max_size=1500000000  # 1.5GB
+        
         echo "压缩包大小: $(numfmt --to=iec $file_size)"
         
         if [ $file_size -gt $max_size ]; then
-          echo "::notice::文件过大($(numfmt --to=iec $file_size))，进行分割处理..."
-          # 使用split分割文件
-          split -b 1000m -d "$pack_name" "upload/${pack_name}_part"
-          rm -f "$pack_name"
+          echo "文件过大，进行分割..."
           
-          # 统计分割结果
-          count=$(find upload/ -name "${pack_name}_part*" | wc -l)
-          echo "分割完成，共生成 $count 个分卷文件"
+          # 计算分割大小 (1.4GB)
+          split_size=1400m
+          
+          # 分割文件
+          split -b $split_size -d "$pack_name" "upload/${pack_name}_part"
+          
+          echo "分割完成，上传目录内容:"
+          ls -lh upload/
         else
-          echo "移动压缩包到upload目录"
+          echo "移动单个压缩包到upload目录"
           mv -v "$pack_name" upload/
-          echo "单个压缩包已准备好上传"
+          
+          echo "上传目录内容:"
+          ls -lh upload/
         fi
-        
-        echo "最终上传文件:"
-        ls -lh upload
-        echo "Upload目录内容:"
-        ls -lh upload/
+        echo "::endgroup::"
         
     - name: 验证上传文件
       run: |
+        echo "::group::验证上传文件"
+        # 检查上传目录是否存在
+        if [ ! -d "upload" ]; then
+          echo "::error::上传目录不存在"
+          exit 1
+        fi
+        
+        # 检查是否有文件
         if [ -z "$(ls -A upload)" ]; then
-          echo "::error::上传目录为空，没有文件可发布"
+          echo "::error::上传目录为空!"
           exit 1
         else
-          echo "上传文件验证通过:"
+          echo "上传文件列表 ($(ls upload | wc -l) 个文件):"
           ls -lh upload
         fi
+        echo "::endgroup::"
           
     - name: 发布SGSI版本
       uses: ncipollo/release-action@v1.8.6
