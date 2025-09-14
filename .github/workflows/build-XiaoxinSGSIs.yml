@@ -1,4 +1,4 @@
-name: Build_XiaoxinSGSIs_For_A10_AB
+name: Build_XiaoxinSGSIs_For_A10_AB_old
 
 on:
   watch:
@@ -94,7 +94,7 @@ jobs:
         fi
         
         # 检查是否下载成功
-        if [ ! -f "$极速版rom_path" ]; then
+        if [ ! -f "$rom_path" ]; then
           echo "::error::❌ ROM文件下载失败"
           exit 1
         else
@@ -360,17 +360,17 @@ jobs:
         body: |
           ##  🌟 SGSI镜像构建成功
           
-          ###  📋 构建详情
+          ###   📋 构建详情
           - **源ROM**: ${{ env.rom_name }}
           - **构建时间**: ${{ steps.timestamp.outputs.time }}
           - **文件大小**: $(numfmt --to=iec $file_size)
           ${{ env.SPLIT_NEEDED == 'true' && '- **文件状态**: 已分割为多个部分' || '- **文件状态**: 单个文件' }}
           - **构建日志**: [查看详情](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           
-          ## 📦 解压指南
-          ${{ env.SPLIT_NEEDED == 'true' && '###  ✂️ 分割文件解压方法：' || '###  📄 单文件解压方法：' }}
+          ##  📦 解压指南
+          ${{ env.SPLIT_NEEDED == 'true' && '###   ✂️ 分割文件解压方法：' || '###  📄 单文件解压方法：' }}
           
-          ${{ env.SPLIT_NEEDED == 'true' && '####  💻 电脑端（Windows/Linux/macOS）：
+          ${{ env.SPLIT_NEEDED == 'true' && '####   💻 电脑端（Windows/Linux/macOS）：
           **推荐软件**: 
           - 7-Zip (Windows) https://www.7-zip.org/
           - The Unarchiver (macOS) https://theunarchiver.com/
@@ -399,7 +399,7 @@ jobs:
           2. 下载所有分割文件到同一目录
           3. 打开ZArchiver → 找到分割文件目录
           4. 长按第一个文件(`' + env.pack_sgsi + '_part00`) → 解压 → 自动合并所有部分
-          5. 解压生成的完整ZIP文件' || '#### 💻 电脑端：
+          5. 解压生成的完整ZIP文件' || '####  💻 电脑端：
           **推荐软件**: 
           - Bandizip (Windows) https://www.bandisoft.com/bandizip/
           - Keka (macOS) https://www.keka.io/
@@ -413,7 +413,7 @@ jobs:
           unzip ' + env.pack_sgsi + '
           ```
           
-          #### 📱 手机端：
+          ####  📱 手机端：
           **推荐应用**: 
           - ZArchiver https://play.google.com/store/apps/details?id=ru.zdevs.zarchiver
           - RAR for Android https://play.google.com/store/apps/details?id=com.rarlab.rar
