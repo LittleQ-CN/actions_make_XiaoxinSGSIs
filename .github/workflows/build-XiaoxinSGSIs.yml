@@ -21,16 +21,29 @@ jobs:
     - name: 读取配置文件
       id: var
       run: |
-        echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "rom_name=$(jq -r '.rom_name' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "make_miui=$(jq -r '.make_miui' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "make_flyme=$(jq -r '.make_flyme' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "make_coloros=$(jq -r '.make_coloros' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "make_h2os=$(jq -r '.make_h2os' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
-        echo "make_super=$(jq -r '.make_super' sgsi.json)" >> $GITHUB_OUTPUT
+        # 使用新的环境文件方式设置输出变量
+        rom_url=$(jq -r '.rom_url' sgsi.json)
+        rom_name=$(jq -r '.rom_name' sgsi.json)
+        pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
+        make_miui=$(jq -r '.make_miui' sgsi.json)
+        make_flyme=$(jq -r '.make_flyme' sgsi.json)
+        make_coloros=$(jq -r '.make_coloros' sgsi.json)
+        make_h2os=$(jq -r '.make_h2os' sgsi.json)
+        make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)
+        make_zui=$(jq -r '.make_zui' sgsi.json)
+        make_super=$(jq -r '.make_super' sgsi.json)
+        
+        # 设置环境变量
+        echo "rom_url=$rom_url" >> $GITHUB_ENV
+        echo "rom_name=$rom_name" >> $GITHUB_ENV
+        echo "pack_sgsi=$pack_sgsi" >> $GITHUB_ENV
+        echo "make_miui=$make_miui" >> $GITHUB_ENV
+        echo "make_flyme=$make_flyme" >> $GITHUB_ENV
+        echo "make_coloros=$make_coloros" >> $GITHUB_ENV
+        echo "make_h2os=$make_h2os" >> $GITHUB_ENV
+        echo "make_smartisanos=$make_smartisanos" >> $GITHUB_ENV
+        echo "make_zui=$make_zui" >> $GITHUB_ENV
+        echo "make_super=$make_super" >> $GITHUB_ENV
         
     - name: 下载构建工具
       run: |
@@ -64,50 +77,63 @@ jobs:
         cd ../..
         
     - name: 下载ROM文件
-      run: wget -c ${{ steps.var.outputs.rom_url }} -O SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
+      run: |
+        mkdir -p SGSI-build-tool/10/tmp
+        # 使用-q参数进行静默下载
+        wget -q -c "${{ env.rom_url }}" -O "SGSI-build-tool/10/tmp/${{ env.rom_name }}"
+        
+        if [ ! -f "SGSI-build-tool/10/tmp/${{ env.rom_name }}" ]; then
+          echo "::error::ROM文件下载失败"
+          # 尝试重新下载一次并显示错误信息
+          wget -c "${{ env.rom_url }}" -O "SGSI-build-tool/10/tmp/${{ env.rom_name }}" || true
+          exit 1
+        else
+          echo "ROM文件已成功下载（静默模式）"
+          echo "文件大小: $(du -sh SGSI-build-tool/10/tmp/${{ env.rom_name }} | cut -f1)"
+        fi
     
     - name: 启用Super分区支持
-      if: ${{ steps.var.outputs.make_super == 'true' }}
+      if: ${{ env.make_super == 'true' }}
       run: sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
     
     - name: 生成MIUI镜像
-      if: ${{ steps.var.outputs.make_miui == 'true' }}
+      if: ${{ env.make_miui == 'true' }}
       run: |
         rm -f SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
         chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成Flyme镜像
-      if: ${{ steps.var.outputs.make_flyme == 'true' }}
+      if: ${{ env.make_flyme == 'true' }}
       run: |
         rm -f SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
         chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成ColorOS镜像
-      if: ${{ steps.var.outputs.make_coloros == 'true' }}
+      if: ${{ env.make_coloros == 'true' }}
       run: |
-        python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
-        rm -f SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
+        python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ env.rom_name }}
+        rm -f SGSI-build-tool/10/tmp/${{ env.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
         chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成HydrogenOS镜像
-      if: ${{ steps.var.outputs.make_h2os == 'true' }}
+      if: ${{ env.make_h2os == 'true' }}
       run: |
         rm -f SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
         chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成SmartisanOS镜像
-      if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
+      if: ${{ env.make_smartisanos == 'true' }}
       run: |
         rm -f SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
         chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
     - name: 生成ZUI镜像
-      if: ${{ steps.var.outputs.make_zui == 'true' }}
+      if: ${{ env.make_zui == 'true' }}
       run: |
         rm -f SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
@@ -138,28 +164,59 @@ jobs:
         echo -e "# 默认文件系统配置\n/system 0 0 755\n/vendor 0 0 755" > out/config/system_fs_config
         
         # 执行构建
+        echo "开始构建SGSI镜像..."
         ./make.sh || true
+        echo "构建完成"
         
         # 验证构建结果
         if [ ! -f "out/system.img" ]; then
           echo "::warning::system.img未生成，尝试手动创建"
-          ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 out/system.img 512M
-          ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config -S out/config/system_file_contexts -f out/system/ -a /system out/system.img || true
+          
+          # 计算所需镜像大小（目录大小 + 30%）
+          size_kb=$(du -sk out/system/ | cut -f1)
+          img_size_kb=$((size_kb + (size_kb * 30 / 100)))
+          img_size_mb=$((img_size_kb / 1024))
+          
+          # 确保最小512MB
+          if [ $img_size_mb -lt 512 ]; then
+            img_size_mb=512
+          fi
+          
+          echo "估算目录大小: ${size_kb}KB, 设置镜像大小: ${img_size_mb}MB"
+          
+          # 创建镜像文件
+          ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 out/system.img ${img_size_mb}M
+          
+          # 填充镜像
+          ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config \
+            -S out/config/system_file_contexts -f out/system/ -a /system out/system.img || true
+            
           if [ ! -f "out/system.img" ]; then
             echo "::error::无法生成system.img"
             exit 1
+          else
+            echo "手动创建的system.img大小: $(du -sh out/system.img)"
           fi
+        else
+          echo "自动生成的system.img大小: $(du -sh out/system.img)"
         fi
         
         # 移动生成的文件
+        mkdir -p SGSI
         mv out/system.img SGSI/
+        echo "SGSI目录内容:"
+        ls -lh SGSI
         
     - name: 打包系统补丁
       run: |
         for i in 1 2 3; do
           echo "打包补丁 Patch$i"
-          zip -r -0 "Patch$i.zip" "Patch/Patch$i"/*
-          mv "Patch$i.zip" SGSI-build-tool/10/SGSI/
+          if [ -d "Patch/Patch$i" ]; then
+            zip -r -0 "Patch$i.zip" "Patch/Patch$i"/*
+            mv "Patch$i.zip" SGSI-build-tool/10/SGSI/
+          else
+            echo "::warning::Patch/Patch$i 目录不存在，跳过"
+          fi
         done
 
     - name: 打包并准备上传SGSI镜像
@@ -170,9 +227,13 @@ jobs:
         # 进入SGSI输出目录
         cd SGSI-build-tool/10/SGSI
         
+        # 检查目录内容
+        echo "SGSI目录内容:"
+        ls -lh
+        
         echo "::group::打包SGSI镜像"
         # 创建完整压缩包
-        pack_name="${{ steps.var.outputs.pack_sgsi }}"
+        pack_name="${{ env.pack_sgsi }}"
         echo "正在创建压缩包: $pack_name"
         zip -r -0 "../../../../$pack_name" .
         echo "压缩包创建完成"
@@ -181,8 +242,14 @@ jobs:
         # 返回工作目录
         cd ../../../../
         
-        # 确保上传目录存在（再次确认）
-        mkdir -p upload || true
+        # 检查文件是否存在
+        if [ ! -f "$pack_name" ]; then
+          echo "::error::压缩包 $pack_name 未创建"
+          exit 1
+        fi
+        
+        # 确保上传目录存在
+        mkdir -p upload
         echo "当前工作目录: $(pwd)"
         echo "目录内容:"
         ls -l
@@ -211,6 +278,16 @@ jobs:
         ls -lh upload
         echo "Upload目录内容:"
         ls -lh upload/
+        
+    - name: 验证上传文件
+      run: |
+        if [ -z "$(ls -A upload)" ]; then
+          echo "::error::上传目录为空，没有文件可发布"
+          exit 1
+        else
+          echo "上传文件验证通过:"
+          ls -lh upload
+        fi
           
     - name: 发布SGSI版本
       uses: ncipollo/release-action@v1.8.6
