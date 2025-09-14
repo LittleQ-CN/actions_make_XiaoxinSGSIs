@@ -4,21 +4,23 @@ on:
   watch:
     types: [started]  # 当有人star仓库时触发工作流
 
-env:
-  BUILD_TIME: ${{ format('{0}{1}{2}-{3}{4}{5}', 
-                          format(utcnow(), 'yyyy'), 
-                          format(utcnow(), 'MM'), 
-                          format(utcnow(), 'dd'),
-                          format(utcnow(), 'HH'),
-                          format(utcnow(), 'mm'),
-                          format(utcnow(), 'ss')) }}
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      BUILD_TIME: ${{ steps.set_time.outputs.BUILD_TIME }}
+      
     steps:
     - name: '📥 检出仓库'
       uses: actions/checkout@v4
+    
+    - name: '🕒 设置构建时间'
+      id: set_time
+      run: |
+        # 获取当前时间并格式化为 YYYY_MM_DD ahh:mm:ss
+        DATETIME=$(date -u "+%Y_%m_%d a%H:%M:%S")
+        echo "BUILD_TIME=$DATETIME" >> $GITHUB_ENV
+        echo "::set-output name=BUILD_TIME::$DATETIME"
     
     - name: "📝 读取配置文件"
       id: var
@@ -121,7 +123,7 @@ jobs:
             
             # 获取原始日期的时区
             original_tz=$(echo "$build_date" | grep -oE '[A-Z]{3,4}')
-            [ -z "$original_t极速版z" ] && original_tz="UTC"  # 默认时区
+            [ -z "$original_tz" ] && original_tz="UTC"  # 默认时区
             
             # 尝试转换为中文格式（12小时制）
             build_date_zh=$(date -d "$build_date" +"%Y年%m月%d日 %I:%M:%S %p" 2>/dev/null)
@@ -367,7 +369,7 @@ jobs:
         
         # 添加安装说明
         echo "" >> release_body.md
-        echo "###  📥 安装说明" >> release_body.md
+        echo "### 📥 安装说明" >> release_body.md
         echo "1. 下载镜像到手机存储" >> release_body.md
         echo "2. 进入TWRP或OrangeFox Recovery" >> release_body.md
         echo "3. 选择安装 → 选择镜像文件 → 刷入System分区" >> release_body.md
