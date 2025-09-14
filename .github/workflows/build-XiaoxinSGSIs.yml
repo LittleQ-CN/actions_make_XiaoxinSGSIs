@@ -248,15 +248,12 @@ jobs:
         # 确保SGSI目录存在
         mkdir -p SGSI-build-tool/10/SGSI
         
-        # 进入SGSI目录
-        cd SGSI-build-tool/10/SGSI
-        
         # 检查目录内容
         echo "SGSI目录内容:"
-        ls -lh
+        ls -lh SGSI-build-tool/10/SGSI/
         
         # 确保有文件存在
-        if [ -z "$(ls -A .)" ]; then
+        if [ -z "$(ls -A SGSI-build-tool/10/SGSI/* 2>/dev/null)" ]; then
           echo "::error::SGSI目录为空，无法创建压缩包"
           exit 1
         fi
@@ -264,28 +261,30 @@ jobs:
         # 创建压缩包
         pack_name="${{ env.pack_sgsi }}"
         echo "创建压缩包: $pack_name"
-        zip -r -0 "../../../../$pack_name" .
+        
+        # 直接在工作区根目录创建压缩包
+        zip -r -0 "$pack_name" SGSI-build-tool/10/SGSI/*
         
         # 检查压缩包
-        if [ ! -f "../../../../$pack_name" ]; then
+        if [ ! -f "$pack_name" ]; then
           echo "::error::压缩包创建失败: $pack_name"
+          ls -lh  # 显示当前目录内容以便调试
           exit 1
         fi
         
-        echo "压缩包大小: $(du -sh "../../../../$pack_name" | cut -f1)"
+        echo "压缩包大小: $(du -sh "$pack_name" | cut -f1)"
         echo "::endgroup::"
-        
-        # 返回工作目录
-        cd ../../../../
         
     - name: 准备上传文件
       run: |
         echo "::group::准备上传文件"
         pack_name="${{ env.pack_sgsi }}"
         
-        # 确保压缩包存在
+        # 确保压缩包存在 (直接在工作区根目录查找)
         if [ ! -f "$pack_name" ]; then
           echo "::error::最终压缩包不存在: $pack_name"
+          echo "当前目录内容:"
+          ls -lh  # 显示当前目录内容以便调试
           exit 1
         fi
         
