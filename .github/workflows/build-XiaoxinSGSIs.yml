@@ -19,7 +19,7 @@ jobs:
         df -h
         
     - name: 读取配置文件
-      id: var  # 修复为正确的ID
+      id: var
       run: |
         echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUTPUT
         echo "rom_name=$(jq -r '.rom_name' sgsi.json)" >> $GITHUB_OUTPUT
@@ -164,9 +164,8 @@ jobs:
 
     - name: 打包并准备上传SGSI镜像
       run: |
-        # 准备上传目录
-        rm -rf upload
-        mkdir -p upload
+        # 确保上传目录存在（使用绝对路径）
+        mkdir -p "$GITHUB_WORKSPACE/upload"
         
         # 进入SGSI输出目录
         cd SGSI-build-tool/10/SGSI
@@ -174,11 +173,19 @@ jobs:
         echo "::group::打包SGSI镜像"
         # 创建完整压缩包
         pack_name="${{ steps.var.outputs.pack_sgsi }}"
+        echo "正在创建压缩包: $pack_name"
         zip -r -0 "../../../../$pack_name" .
+        echo "压缩包创建完成"
         echo "::endgroup::"
         
         # 返回工作目录
         cd ../../../../
+        
+        # 确保上传目录存在（再次确认）
+        mkdir -p upload || true
+        echo "当前工作目录: $(pwd)"
+        echo "目录内容:"
+        ls -l
         
         # 检查文件大小
         max_size=2000000000  # 2GB
@@ -189,18 +196,21 @@ jobs:
           echo "::notice::文件过大($(numfmt --to=iec $file_size))，进行分割处理..."
           # 使用split分割文件
           split -b 1000m -d "$pack_name" "upload/${pack_name}_part"
-          rm "$pack_name"
+          rm -f "$pack_name"
           
           # 统计分割结果
-          count=$(ls upload/${pack_name}_part* | wc -l)
+          count=$(find upload/ -name "${pack_name}_part*" | wc -l)
           echo "分割完成，共生成 $count 个分卷文件"
         else
-          mv "$pack_name" upload/
+          echo "移动压缩包到upload目录"
+          mv -v "$pack_name" upload/
           echo "单个压缩包已准备好上传"
         fi
         
         echo "最终上传文件:"
         ls -lh upload
+        echo "Upload目录内容:"
+        ls -lh upload/
           
     - name: 发布SGSI版本
       uses: ncipollo/release-action@v1.8.6
