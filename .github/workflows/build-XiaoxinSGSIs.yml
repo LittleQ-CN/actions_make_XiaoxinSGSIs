@@ -13,10 +13,32 @@ jobs:
     - name: "📥 检出代码库"
       uses: actions/checkout@v3
       
+    - name: "⚙️ 安装下载工具"
+      run: |
+        if ! command -v axel &> /dev/null; then
+          echo "⬇️ 安装axel多线程下载器..."
+          sudo apt-get update
+          sudo apt-get install -y axel
+        fi
+        echo "✅ 下载工具: $(axel --version 2>/dev/null || curl --version | head -n1 || wget --version | head -n1)"
+        
     - name: "🧹 清理工作区"
       run: |
+        sudo swapoff -a || true
+        sudo rm -f /swapfile || true
+        sudo sysctl vm.drop_caches=3 || true
+        
         rm -rf SGSI-build-tool upload || true
         df -h
+        
+    - name: "💾 增加Swap空间"
+      run: |
+        # 添加4GB交换空间防止OOM
+        sudo fallocate -l 4G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        free -m
         
     - name: "📝 读取配置文件"
       id: var
@@ -43,18 +65,71 @@ jobs:
         echo "make_zui=$make_zui" >> $GITHUB_ENV
         echo "make_super=$make_super" >> $GITHUB_ENV
         
-    - name: "⬇️ 下载构建工具"
+    - name: "📥 下载ROM文件"
       run: |
-        if command -v curl &> /dev/null; then
-          curl -sSL -o SGSI-build-tool.tar https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
-        else
-          wget -q -c https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
+        rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
+        mkdir -p SGSI-build-tool/10/tmp
+        file_name="${{ env.rom_name }}"
+        
+        echo "⬇️ 开始下载ROM文件: $file_name"
+        echo "🔗 URL: ${{ env.rom_url }}"
+        
+        # 优先使用axel多线程下载（简洁进度条）
+        if command -v axel &> /dev/null; then
+          echo "🚀 使用axel多线程下载 (8连接)"
+          axel -n 8 -q -a -o "$rom_path" "${{ env.rom_url }}" > /dev/null &
+          axel_pid=$!
+          
+          # 显示带文件名的精简进度
+          while kill -0 $axel_pid 2>/dev/null; do
+            if [ -f "$rom_path" ]; then
+              current_size=$(du -h "$rom_path" | cut -f1)
+              # 文件名+大小显示（单行刷新）
+              echo -ne "⬇️ [$file_name] $current_size\r"
+            fi
+            sleep 2
+          done
+          wait $axel_pid
+          echo -e "\n"
         fi
         
-        if [ ! -f SGSI-build-tool.tar ]; then
+        # 如果axel不可用或失败，使用curl
+        if [ ! -f "$rom_path" ] || [ ! -s "$rom_path" ]; then
+          if command -v curl &> /dev/null; then
+            echo "🔧 使用curl下载 [$file_name]"
+            curl -# -L --retry 3 --retry-delay 5 -C - "${{ env.rom_url }}" -o "$rom_path"
+          elif command -v wget &> /dev/null; then
+            echo "🔧 使用wget下载 [$file_name]"
+            wget -q --show-progress -c -t 3 -O "$rom_path" "${{ env.rom_url }}"
+          fi
+        fi
+        
+        # 最终检查文件
+        if [ ! -f "$rom_path" ] || [ ! -s "$rom_path" ]; then
+          echo "::error::❌ [$file_name] 下载失败"
+          exit 1
+        fi
+        
+        # 显示最终大小
+        file_size=$(du -h "$rom_path" | cut -f1)
+        echo "✅ [$file_name] 下载完成! 大小: $file_size"
+    
+    - name: "⬇️ 下载构建工具"
+      run: |
+        echo "⬇️ 下载SGSI构建工具..."
+        if command -v axel &> /dev/null; then
+          axel -n 8 -q -a -o SGSI-build-tool.tar "https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar" > /dev/null
+        elif command -v curl &> /dev/null; then
+          curl -# -L -o SGSI-build-tool.tar "https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
+        elif command -v wget &> /dev/null; then
+          wget -q --show-progress -c -O SGSI-build-tool.tar "https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
+        fi
+        
+        if [ ! -f "SGSI-build-tool.tar" ]; then
           echo "::error::❌ 工具包下载失败"
           exit 1
         fi
+        echo "✅ 工具包下载完成"
         
     - name: "⚙️ 设置构建环境"
       run: |
@@ -72,26 +147,6 @@ jobs:
         cd SGSI-build-tool/10
         ./setup.sh || true
         cd ../..
-    
-    - name: "📥 下载ROM文件"
-      run: |
-        mkdir -p SGSI-build-tool/10/tmp
-        rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
-        
-        if command -v curl &> /dev/null; then
-          curl -L -k -sS -C - "${{ env.rom_url }}" -o "$rom_path" || true
-        fi
-        
-        if [ ! -f "$rom_path" ] && command -v wget &> /dev/null; then
-          wget -q -c "${{ env.rom_url }}" -O "$rom_path" || true
-        fi
-        
-        if [ ! -f "$rom_path" ]; then
-          echo "::error::❌ ROM文件下载失败"
-          exit 1
-        else
-          echo "✅ ROM文件下载成功! 文件大小: $(du -sh "$rom_path" | cut -f1)"
-        fi
     
     - name: "✨ 启用Super分区支持"
       if: ${{ env.make_super == 'true' }}
@@ -160,15 +215,18 @@ jobs:
         fi
          
     - name: "🔨 构建SGSI系统镜像"
-      timeout-minutes: 120
+      timeout-minutes: 180  # 增加超时时间
       run: |
-        rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
-        mv make/* SGSI-build-tool/10/
-        mv bin/* SGSI-build-tool/10/bin/
+        # 清理内存和磁盘空间
+        sync
+        sudo sysctl vm.drop_caches=3
+        df -h
         
+        # 确保所有脚本有执行权限
         find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
         
+        # 准备构建环境
         cd SGSI-build-tool/10
         mkdir -p out/{system,config}
         mkdir -p out/system/{bin,etc,lib,usr,framework,app,priv-app,vendor}
@@ -177,41 +235,60 @@ jobs:
         echo -e "# 默认文件系统配置\n/system 0 0 755\n/vendor 0 0 755" > out/config/system_fs_config
         
         echo "::group::📜 构建日志"
-        build_output=$(./make.sh 2>&1 || true)
+        # 使用详细调试模式运行构建脚本
+        build_output=$(set -x; ./make.sh 2>&1 || true)
         echo "$build_output"
         
+        # 检查常见错误
         if echo "$build_output" | grep -q "sdat2img: failed"; then
           echo "::error::❌ sdat2img转换失败"
+        fi
+        if echo "$build_output" | grep -q "No space left"; then
+          echo "::error::❌ 磁盘空间不足"
+          df -h
           exit 1
         fi
         echo "::endgroup::"
         
+        # 回退机制：手动创建system.img
         if [ ! -f "out/system.img" ]; then
-          echo "::warning::⚠️ system.img未生成，尝试手动创建"
+          echo "::warning::⚠️ system.img未生成，尝试手动创建..."
           
-          if [ ! -d "out/system" ]; then
-            echo "::error::❌ out/system目录不存在，无法创建镜像"
+          if [ ! -d "out/system" ] || [ -z "$(ls -A out/system)" ]; then
+            echo "::error::❌ out/system目录不存在或为空"
             exit 1
           fi
           
+          # 计算所需空间（增加20%余量）
           size_kb=$(du -sk out/system/ | cut -f1)
-          img_size_kb=$((size_kb * 130 / 100))
+          img_size_kb=$((size_kb * 120 / 100))
           img_size_mb=$((img_size_kb / 1024))
-          [ $img_size_mb -lt 512 ] && img_size_mb=512
+          [ $img_size_mb -lt 1024 ] && img_size_mb=1024  # 最小1GB
           
-          echo "📦 创建 ${img_size_mb}MB 镜像"
-          ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 out/system.img ${img_size_mb}M
-          ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config -S out/config/system_file_contexts -f out/system/ -a /system out/system.img
+          echo "📦 创建 ${img_size_mb}MB 镜像..."
+          ./bin/make_ext4fs -T 1230768000 -S out/config/system_file_contexts \
+                            -C out/config/system_fs_config -l ${img_size_mb}M \
+                            -L system out/system.img out/system/
           
+          # 验证镜像是否创建成功
           if [ ! -f "out/system.img" ]; then
             echo "::error::❌ 无法生成system.img"
             exit 1
+          else
+            echo "✅ 手动创建system.img成功! 大小: $(du -sh out/system.img | cut -f1)"
           fi
+        else
+          echo "✅ 自动构建system.img成功! 大小: $(du -sh out/system.img | cut -f1)"
         fi
         
+        # 准备最终输出
         mkdir -p SGSI
-        mv out/system.img SGSI/
+        mv -v out/system.img SGSI/
         cd ../..
+        
+        echo "🔄 清理中间文件释放磁盘空间..."
+        rm -rf SGSI-build-tool/10/{tmp,out}
+        df -h
         
     - name: "📦 打包系统补丁"
       run: |
@@ -414,7 +491,7 @@ jobs:
         echo "- **文件大小**: $(numfmt --to=iec ${{ env.FILE_SIZE }})" >> release_body.md
         echo "- **构建日志**: [${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}]" >> release_body.md
         echo "" >> release_body.md
-        echo "### ⚙️ 系统配置" >> release_body.md
+        echo "###  ⚙️ 系统配置" >> release_body.md
         detect_version >> release_body.md
         echo "" >> release_body.md
         echo "> **注意**: 请确保下载所有文件（如果被分割）" >> release_body.md
