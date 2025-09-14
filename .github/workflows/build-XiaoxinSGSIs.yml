@@ -15,7 +15,7 @@ jobs:
       
     - name: 清理工作区
       run: |
-        rm -rf SGSI-build-tool || true
+        rm -rf SGSI-build-tool upload || true
         df -h
         
     - name: 读取配置变量
@@ -171,9 +171,13 @@ jobs:
 
     - name: 压缩SGSI成果物
       run: |
+        # 确保上传目录存在
+        rm -rf upload
         mkdir -p upload
+        
+        # 创建压缩包
         cd SGSI-build-tool/10/SGSI
-        zip -r ../../../../${{ steps.var.outputs.pack_sgsi }} *
+        zip -r "../../../../${{ steps.var.outputs.pack_sgsi }}" *
         cd ../../../../
         
         # 检查文件大小
@@ -182,7 +186,8 @@ jobs:
         
         if [ $file_size -gt $max_size ]; then
           echo "::notice::文件过大($file_size字节)，进行分割打包..."
-          split -d -b 1000m "${{ steps.var.outputs.pack_sgsi }}" "upload/${{ steps.var.outputs.pack_sgsi }}_part"
+          # 使用tar和split组合确保目录结构
+          tar -cvzf - "${{ steps.var.outputs.pack_sgsi }}" | split -d -b 1000m - "upload/${{ steps.var.outputs.pack_sgsi }}_part"
         else
           mv "${{ steps.var.outputs.pack_sgsi }}" upload/
         fi
@@ -192,7 +197,7 @@ jobs:
     - name: 发布SGSI版本
       uses: ncipollo/release-action@v1.8.6
       with:
-        artifacts: upload/*
+        artifacts: 'upload/*'
         name: xiaoxinSGSI-ab-Android10-unpack
         tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}
         token: ${{ secrets.GITHUB_TOKEN }}
