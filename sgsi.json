@@ -1,7 +1,7 @@
 {
   "rom_url": "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/V11.0.2.0.QDTCNXM/miui_MI8Lite_V11.0.2.0.QDTCNXM_4a11ed64fc_10.0.zip",
   "rom_name": "miui_MI8Lite_V11.0.2.0.QDTCNXM_4a11ed64fc_10.0.zip",
-  "pack_sgsi": "MIUI11-M8Lite_A10_CN_TEST.zip",
+  "pack_sgsi": "MIUI11-M8Lite_A10_CN_TEST-AB.zip",
   "make_miui": true,
   "make_flyme": false,
   "make_coloros": false,
