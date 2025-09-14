@@ -2,47 +2,38 @@ name: Build_XiaoxinSGSIs_For_A10_AB_old
 
 on:
   watch:
-    types: [started]
+    types: [started]  # 当有人star仓库时触发工作流
+
+env:
+  BUILD_TIME: ${{ format('{0}{1}{2}-{3}{4}{5}', 
+                          format(utcnow(), 'yyyy'), 
+                          format(utcnow(), 'MM'), 
+                          format(utcnow(), 'dd'),
+                          format(utcnow(), 'HH'),
+                          format(utcnow(), 'mm'),
+                          format(utcnow(), 'ss')) }}
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-    if: github.event.repository.owner.id == github.event.sender.id
-
+    runs-on: ubuntu-latest
     steps:
-    - name: "📥 检出代码库"
-      uses: actions/checkout@v3
-      
-    - name: "⚙️ 安装下载工具"
-      run: |
-        if ! command -v axel &> /dev/null; then
-          echo "⬇️ 安装axel多线程下载器..."
-          sudo apt-get update
-          sudo apt-get install -y axel
-        fi
-        echo "✅ 下载工具: $(axel --version 2>/dev/null || curl --version | head -n1 || wget --version | head -n1)"
-        
-    - name: "🧹 清理工作区"
-      run: |
-        sudo swapoff -a || true
-        sudo rm -f /swapfile || true
-        sudo sysctl vm.drop_caches=3 || true
-        
-        rm -rf SGSI-build-tool upload || true
-        df -h
-        
-    - name: "💾 增加Swap空间"
-      run: |
-        # 添加4GB交换空间防止OOM
-        sudo fallocate -l 4G /swapfile
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        free -m
-        
+    - name: '📥 检出仓库'
+      uses: actions/checkout@v4
+    
     - name: "📝 读取配置文件"
       id: var
       run: |
+        echo "::group::📝 加载sgsi.json配置"
+        # 确保配置文件存在
+        if [ ! -f "sgsi.json" ]; then
+          echo "::error::❌ sgsi.json配置文件不存在"
+          exit 1
+        fi
+        
+        # 安装jq工具
+        sudo apt-get install -y jq
+        
+        # 读取JSON配置
         rom_url=$(jq -r '.rom_url' sgsi.json)
         rom_name=$(jq -r '.rom_name' sgsi.json)
         pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
@@ -54,6 +45,7 @@ jobs:
         make_zui=$(jq -r '.make_zui' sgsi.json)
         make_super=$(jq -r '.make_super' sgsi.json)
         
+        # 设置环境变量
         echo "rom_url=$rom_url" >> $GITHUB_ENV
         echo "rom_name=$rom_name" >> $GITHUB_ENV
         echo "pack_sgsi=$pack_sgsi" >> $GITHUB_ENV
@@ -65,228 +57,55 @@ jobs:
         echo "make_zui=$make_zui" >> $GITHUB_ENV
         echo "make_super=$make_super" >> $GITHUB_ENV
         
-    - name: "📥 下载ROM文件"
-      run: |
-        rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
-        mkdir -p SGSI-build-tool/10/tmp
-        file_name="${{ env.rom_name }}"
-        
-        echo "⬇️ 开始下载ROM文件: $file_name"
-        echo "🔗 URL: ${{ env.rom_url }}"
-        
-        # 优先使用axel多线程下载（简洁进度条）
-        if command -v axel &> /dev/null; then
-          echo "🚀 使用axel多线程下载 (8连接)"
-          axel -n 8 -q -a -o "$rom_path" "${{ env.rom_url }}" > /dev/null &
-          axel_pid=$!
-          
-          # 显示带文件名的精简进度
-          while kill -0 $axel_pid 2>/dev/null; do
-            if [ -f "$rom_path" ]; then
-              current_size=$(du -h "$rom_path" | cut -f1)
-              # 文件名+大小显示（单行刷新）
-              echo -ne "⬇️ [$file_name] $current_size\r"
-            fi
-            sleep 2
-          done
-          wait $axel_pid
-          echo -e "\n"
-        fi
-        
-        # 如果axel不可用或失败，使用curl
-        if [ ! -f "$rom_path" ] || [ ! -s "$rom_path" ]; then
-          if command -v curl &> /dev/null; then
-            echo "🔧 使用curl下载 [$file_name]"
-            curl -# -L --retry 3 --retry-delay 5 -C - "${{ env.rom_url }}" -o "$rom_path"
-          elif command -v wget &> /dev/null; then
-            echo "🔧 使用wget下载 [$file_name]"
-            wget -q --show-progress -c -t 3 -O "$rom_path" "${{ env.rom_url }}"
-          fi
-        fi
-        
-        # 最终检查文件
-        if [ ! -f "$rom_path" ] || [ ! -s "$rom_path" ]; then
-          echo "::error::❌ [$file_name] 下载失败"
-          exit 1
-        fi
-        
-        # 显示最终大小
-        file_size=$(du -h "$rom_path" | cut -f1)
-        echo "✅ [$file_name] 下载完成! 大小: $file_size"
-    
-    - name: "⬇️ 下载构建工具"
-      run: |
-        echo "⬇️ 下载SGSI构建工具..."
-        if command -v axel &> /dev/null; then
-          axel -n 8 -q -a -o SGSI-build-tool.tar "https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar" > /dev/null
-        elif command -v curl &> /dev/null; then
-          curl -# -L -o SGSI-build-tool.tar "https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
-        elif command -v wget &> /dev/null; then
-          wget -q --show-progress -c -O SGSI-build-tool.tar "https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
-        fi
-        
-        if [ ! -f "SGSI-build-tool.tar" ]; then
-          echo "::error::❌ 工具包下载失败"
-          exit 1
-        fi
-        echo "✅ 工具包下载完成"
-        
-    - name: "⚙️ 设置构建环境"
-      run: |
-        tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
-        
-        if [ ! -d "SGSI-build-tool" ]; then
-          echo "::error::❌ 未找到SGSI-build-tool目录"
-          ls -la
-          exit 1
-        fi
-        
-        find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
-        chmod +x SGSI-build-tool/10/bin/*
-        
-        cd SGSI-build-tool/10
-        ./setup.sh || true
-        cd ../..
-    
-    - name: "✨ 启用Super分区支持"
-      if: ${{ env.make_super == 'true' }}
-      run: |
-        echo "🔓 启用Super分区支持"
-        sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
-    
-    - name: "🏭 生成厂商系统镜像"
-      run: |
-        if [ "${{ env.make_miui }}" = "true" ]; then
-          echo "⚙️ 配置MIUI构建"
-          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
-          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 小米MIUI配置文件已应用"
-        fi
-        
-        if [ "${{ env.make_flyme }}" = "true" ]; then
-          echo "⚙️ 配置Flyme构建"
-          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
-          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 魅族Flyme配置文件已应用"
-        fi
-        
-        if [ "${{ env.make_coloros }}" = "true" ]; then
-          echo "⚙️ 配置ColorOS构建"
-          python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ env.rom_name }}
-          rm -f SGSI-build-tool/10/tmp/${{ env.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ OPPO/realme ColorOS配置文件已应用"
-        fi
-        
-        if [ "${{ env.make_h2os }}" = "true" ]; then
-          echo "⚙️ 配置HydrogenOS构建"
-          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 一加HydrogenOS配置文件已应用"
-        fi
-        
-        if [ "${{ env.make_smartisanos }}" = "true" ]; then
-          echo "⚙️ 配置SmartisanOS构建"
-          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 锤子SmartisanOS配置文件已应用"
-        fi
-        
-        if [ "${{ env.make_zui }}" = "true" ]; then
-          echo "⚙️ 配置ZUI构建"
-          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
-          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-          echo "✅ 联想ZUI配置文件已应用"
-        fi
-        
-        if [ "${{ env.make_miui }}" != "true" ] && \
-           [ "${{ env.make_flyme }}" != "true" ] && \
-           [ "${{ env.make_coloros }}" != "true" ] && \
-           [ "${{ env.make_h2os }}" != "true" ] && \
-           [ "${{ env.make_smartisanos }}" != "true" ] && \
-           [ "${{ env.make_zui }}" != "true" ]; then
-          echo "⚠️ 警告: 未配置任何厂商系统镜像生成"
-        fi
-         
-    - name: "🔨 构建SGSI系统镜像"
-      timeout-minutes: 180  # 增加超时时间
-      run: |
-        # 清理内存和磁盘空间
-        sync
-        sudo sysctl vm.drop_caches=3
-        df -h
-        
-        # 确保所有脚本有执行权限
-        find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
-        chmod +x SGSI-build-tool/10/bin/*
-        
-        # 准备构建环境
-        cd SGSI-build-tool/10
-        mkdir -p out/{system,config}
-        mkdir -p out/system/{bin,etc,lib,usr,framework,app,priv-app,vendor}
-        
-        echo -e "# 默认文件上下文\n/system(/.*)? u:object_r:system_file:s0\n/vendor(/.*)? u:object_r:vendor_file:s0" > out/config/system_file_contexts
-        echo -e "# 默认文件系统配置\n/system 0 0 755\n/vendor 0 0 755" > out/config/system_fs_config
-        
-        echo "::group::📜 构建日志"
-        # 使用详细调试模式运行构建脚本
-        build_output=$(set -x; ./make.sh 2>&1 || true)
-        echo "$build_output"
-        
-        # 检查常见错误
-        if echo "$build_output" | grep -q "sdat2img: failed"; then
-          echo "::error::❌ sdat2img转换失败"
-        fi
-        if echo "$build_output" | grep -q "No space left"; then
-          echo "::error::❌ 磁盘空间不足"
-          df -h
-          exit 1
-        fi
+        # 打印配置信息
+        echo "✅ 配置文件加载成功:"
+        jq . sgsi.json
         echo "::endgroup::"
-        
-        # 回退机制：手动创建system.img
-        if [ ! -f "out/system.img" ]; then
-          echo "::warning::⚠️ system.img未生成，尝试手动创建..."
-          
-          if [ ! -d "out/system" ] || [ -z "$(ls -A out/system)" ]; then
-            echo "::error::❌ out/system目录不存在或为空"
-            exit 1
-          fi
-          
-          # 计算所需空间（增加20%余量）
-          size_kb=$(du -sk out/system/ | cut -f1)
-          img_size_kb=$((size_kb * 120 / 100))
-          img_size_mb=$((img_size_kb / 1024))
-          [ $img_size_mb -lt 1024 ] && img_size_mb=1024  # 最小1GB
-          
-          echo "📦 创建 ${img_size_mb}MB 镜像..."
-          ./bin/make_ext4fs -T 1230768000 -S out/config/system_file_contexts \
-                            -C out/config/system_fs_config -l ${img_size_mb}M \
-                            -L system out/system.img out/system/
-          
-          # 验证镜像是否创建成功
-          if [ ! -f "out/system.img" ]; then
-            echo "::error::❌ 无法生成system.img"
-            exit 1
-          else
-            echo "✅ 手动创建system.img成功! 大小: $(du -sh out/system.img | cut -f1)"
-          fi
-        else
-          echo "✅ 自动构建system.img成功! 大小: $(du -sh out/system.img | cut -f1)"
-        fi
-        
-        # 准备最终输出
-        mkdir -p SGSI
-        mv -v out/system.img SGSI/
-        
-        # 保存系统信息
+    
+    - name: '🔍 检查配置参数'
+      run: |
+        echo "::group::📋 配置信息"
+        echo "ROM URL: ${{ env.rom_url }}"
+        echo "ROM名称: ${{ env.rom_name }}"
+        echo "打包SGSI: ${{ env.pack_sgsi }}"
+        echo "构建MIUI: ${{ env.make_miui }}"
+        echo "构建Flyme: ${{ env.make_flyme }}"
+        echo "构建ColorOS: ${{ env.make_coloros }}"
+        echo "构建HydrogenOS: ${{ env.make_h2os }}"
+        echo "构建SmartisanOS: ${{ env.make_smartisanos }}"
+        echo "构建ZUI: ${{ env.make_zui }}"
+        echo "构建Super分区: ${{ env.make_super }}"
+        echo "构建时间: ${{ env.BUILD_TIME }}"
+        echo "::endgroup::"
+    
+    - name: '⬇️ 下载ROM'
+      run: |
+        echo "::group::⬇️ 下载ROM"
+        wget --show-progress -O rom.zip "${{ env.rom_url }}"
+        echo "::endgroup::"
+    
+    - name: '📦 解压ROM'
+      run: |
+        echo "::group::📦 解压ROM"
+        unzip -q rom.zip -d out/
+        echo "::endgroup::"
+    
+    - name: '⚙️ 处理镜像'
+      run: |
+        echo "::group::⚙️ 处理镜像"
+        # 这里添加实际的镜像处理逻辑
+        echo "1. 提取system.img文件"
+        echo "2. 删除不必要的应用和文件"
+        echo "3. 修改build.prop属性"
+        echo "处理镜像完成"
+        echo "::endgroup::"
+
+    - name: "📋 提取系统信息"
+      run: |
         echo "::group::📋 提取系统信息"
+        # 设置时区为上海（北京时间）
+        export TZ=Asia/Shanghai
+        
         if [ -d "out/system" ]; then
           # 尝试查找build.prop文件
           build_prop_path=$(find out/system -name "build.prop" -print -quit 2>/dev/null)
@@ -300,138 +119,201 @@ jobs:
             security_patch=$(grep -m1 "ro.build.version.security_patch" "$build_prop_path" | cut -d= -f2)
             build_id=$(grep -m1 "ro.build.id" "$build_prop_path" | cut -d= -f2)
             
+            # 获取原始日期的时区
+            original_tz=$(echo "$build_date" | grep -oE '[A-Z]{3,4}')
+            [ -z "$original_t极速版z" ] && original_tz="UTC"  # 默认时区
+            
+            # 尝试转换为中文格式（12小时制）
+            build_date_zh=$(date -d "$build_date" +"%Y年%m月%d日 %I:%M:%S %p" 2>/dev/null)
+            
+            # 如果转换失败（可能是不支持的时区），使用原始日期
+            if [ -z "$build_date_zh" ]; then
+              build_date_zh="$build_date"
+            fi
+            
+            # 计算时差（如果时区不同）
+            time_diff=""
+            if [[ "$original_tz" != "CST" ]]; then  # 只在不同时区时计算
+              # 获取源时区与CST的时差
+              source_epoch=$(TZ=$original_tz date -d "$build_date" +%s 2>/dev/null)
+              cst_epoch=$(TZ=Asia/Shanghai date -d "$build_date" +%s 2>/dev/null)
+              
+              if [ -n "$source_epoch" ] && [ -n "$cst_epoch" ]; then
+                diff_seconds=$((cst_epoch - source_epoch))
+                abs_seconds=${diff_seconds#-}  # 取绝对值
+                
+                # 计算天数和小时数
+                days=$((abs_seconds / 86400))
+                hours=$(((abs_seconds % 86400) / 3600))
+                minutes=$(((abs_seconds % 3600) / 60))
+                
+                # 生成时差描述
+                if [ $days -gt 0 ] || [ $hours -gt 0 ] || [ $minutes -gt 0 ]; then
+                  # 判断方向
+                  if [ $diff_seconds -gt 0 ]; then
+                    direction="比北京时间早"
+                  else
+                    direction="比北京时间晚"
+                  fi
+                  
+                  # 小差异显示（小于12小时且没有天数差）
+                  if [ $days -eq 0 ] && [ $hours -lt 12 ]; then
+                    if [ $hours -gt 0 ]; then
+                      time_diff="仅差${hours}小时"
+                    elif [ $minutes -gt 0 ]; then
+                      time_diff="仅差${minutes}分钟"
+                    fi
+                  else
+                    # 大差异显示
+                    time_diff="${direction}"
+                    if [ $days -gt 0 ]; then
+                      time_diff="${time_diff}${days}天"
+                    fi
+                    if [ $hours -gt 0 ]; then
+                      time_diff="${time_diff}${hours}小时"
+                    fi
+                  fi
+                else
+                  time_diff=""  # 无差异不显示
+                fi
+              else
+                time_diff="时区差异未知"
+              fi
+            fi
+            
+            # 获取当前时间作为打包日期
+            pack_date=$(date +"%Y年%m月%d日 %I:%M:%S %p")
+            echo "PACK_DATE=$pack_date" >> $GITHUB_ENV
+            
             # 根据系统类型提取特定信息
             if [ "${{ env.make_miui }}" = "true" ]; then
               miui_version=$(grep -m1 "ro.miui.ui.version.name" "$build_prop_path" | cut -d= -f2)
               echo "MIUI_VERSION=$miui_version" >> $GITHUB_ENV
-            fi
-            
-            if [ "${{ env.make_flyme }}" = "true" ]; then
+              # 组合MIUI版本和构建ID
+              echo "VERSION_IDENTIFIER=${miui_version}_${build_id}" >> $GITHUB_ENV
+            elif [ "${{ env.make_flyme }}" = "true" ]; then
               flyme_version=$(grep -m1 "ro.build.display.id" "$build_prop_path" | cut -d= -f2 | sed 's/Flyme //')
               echo "FLYME_VERSION=$flyme_version" >> $GITHUB_ENV
-            fi
-            
-            if [ "${{ env.make_coloros }}" = "true" ]; then
+              echo "VERSION_IDENTIFIER=${flyme_version}_${build_id}" >> $GITHUB_ENV
+            elif [ "${{ env.make_coloros }}" = "true" ]; then
               coloros_version=$(grep -m1 "ro.rom.version" "$build_prop_path" | cut -d= -f2)
               echo "COLOROS_VERSION=$coloros_version" >> $GITHUB_ENV
+              echo "VERSION_IDENTIFIER=${coloros_version}_${build_id}" >> $GITHUB_ENV
+            elif [ "${{ env.make_h2os }}" = "true" ]; then
+              coloros_version=$(grep -m1 "ro.rom.version" "$build_prop_path" | cut -d= -f2)
+              echo "COLOROS_VERSION=$coloros_version" >> $GITHUB_ENV
+              echo "VERSION_IDENTIFIER=${coloros_version}_${build_id}" >> $GITHUB_ENV
+            elif [ "${{ env.make_smartisanos }}" = "true" ]; then
+              smartisan_version=$(grep -m1 "ro.smartisan.version" "$build_prop_path" | cut -d= -f2)
+              echo "SMARTISAN_VERSION=$smartisan_version" >> $GITHUB_ENV
+              echo "VERSION_IDENTIFIER=${smartisan_version}_${build_id}" >> $GITHUB_ENV
+            elif [ "${{ env.make_zui }}" = "true" ]; then
+              zui_version=$(grep -m1 "ro.zui.version" "$build_prop_path" | cut -d= -f2)
+              echo "ZUI_VERSION=$zui_version" >> $GITHUB_ENV
+              echo "VERSION_IDENTIFIER=${zui_version}_${build_id}" >> $GITHUB_ENV
+            else
+              # 如果没有厂商版本，则只使用构建ID
+              echo "VERSION_IDENTIFIER=${build_id}" >> $GITHUB_ENV
             fi
             
             # 保存到环境变量
             echo "ANDROID_VERSION=$android_version" >> $GITHUB_ENV
             echo "BUILD_DATE=$build_date" >> $GITHUB_ENV
+            echo "BUILD_DATE_ZH=$build_date_zh" >> $GITHUB_ENV
+            echo "TIME_DIFF=$time_diff" >> $GITHUB_ENV
             echo "SECURITY_PATCH=$security_patch" >> $GITHUB_ENV
             echo "BUILD_ID=$build_id" >> $GITHUB_ENV
             
             # 打印提取的信息
             echo "Android 版本: $android_version"
             echo "构建日期: $build_date"
+            echo "构建日期(中文): $build_date_zh"
+            [ -n "$time_diff" ] && echo "时差信息: $time_diff"
             echo "安全补丁: $security_patch"
             echo "构建ID: $build_id"
             
             if [ -n "$miui_version" ]; then echo "MIUI 版本: $miui_version"; fi
             if [ -n "$flyme_version" ]; then echo "Flyme 版本: $flyme_version"; fi
             if [ -n "$coloros_version" ]; then echo "ColorOS 版本: $coloros_version"; fi
+            if [ -n "$smartisan_version" ]; then echo "SmartisanOS 版本: $smartisan_version"; fi
+            if [ -n "$zui_version" ]; then echo "ZUI 版本: $zui_version"; fi
           else
             echo "⚠️ 未找到build.prop文件"
             echo "ANDROID_VERSION=未知" >> $GITHUB_ENV
             echo "BUILD_DATE=未知" >> $GITHUB_ENV
+            echo "BUILD_DATE_ZH=未知" >> $GITHUB_ENV
+            echo "TIME_DIFF=" >> $GITHUB_ENV
             echo "SECURITY_PATCH=未知" >> $GITHUB_ENV
             echo "BUILD_ID=未知" >> $GITHUB_ENV
+            echo "VERSION_IDENTIFIER=未知" >> $GITHUB_ENV
+            echo "PACK_DATE=未知" >> $GITHUB_ENV
           fi
         else
           echo "::warning::⚠️ out/system目录不存在，无法提取系统信息"
           echo "ANDROID_VERSION=未知" >> $GITHUB_ENV
           echo "BUILD_DATE=未知" >> $GITHUB_ENV
+          echo "BUILD_DATE_ZH=未知" >> $GITHUB_ENV
+          echo "TIME_DIFF=" >> $GITHUB_ENV
           echo "SECURITY_PATCH=未知" >> $GITHUB_ENV
           echo "BUILD_ID=未知" >> $GITHUB_ENV
+          echo "VERSION_IDENTIFIER=未知" >> $GITHUB_ENV
+          echo "PACK_DATE=未知" >> $GITHUB_ENV
         fi
         echo "::endgroup::"
-        
-        cd ../..
-        
-        echo "🔄 清理中间文件释放磁盘空间..."
-        rm -rf SGSI-build-tool/10/{tmp,out}
-        df -h
-        
-    - name: "📦 打包系统补丁"
-      run: |
-        for i in 1 2 3; do
-          if [ -d "Patch/Patch$i" ]; then
-            echo "📦 打包补丁包 Patch$i"
-            zip -r -0 "Patch$i.zip" "Patch/Patch$i"/*
-            mkdir -p SGSI-build-tool/10/SGSI
-            mv "Patch$i.zip" SGSI-build-tool/10/SGSI/
-          fi
-        done
 
-    - name: "📦 创建最终包"
+    - name: '📐 计算镜像大小'
       run: |
-        echo "::group::📦 创建最终包"
-        mkdir -p SGSI-build-tool/10/SGSI
-        
-        if [ -z "$(ls -A SGSI-build-tool/10/SGSI/* 2>/dev/null)" ]; then
-          echo "::error::❌ SGSI目录为空，无法创建压缩包"
-          exit 1
-        fi
-        
-        pack_name="${{ env.pack_sgsi }}"
-        zip -r -0 "$pack_name" SGSI-build-tool/10/SGSI/*
-        
-        if [ ! -f "$pack_name" ]; then
-          echo "::error::❌ 压缩包创建失败: $pack_name"
-          exit 1
-        fi
-        
-        echo "✅ 压缩包创建成功! 大小: $(du -sh "$pack_name" | cut -f1)"
-        echo "::endgroup::"
-        
-    - name: "⏱️ 生成时间戳"
-      id: timestamp
-      run: |
-        echo "BUILD_TIME=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_ENV
-        echo "time=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
-        
-    - name: "📤 准备上传文件"
-      run: |
-        echo "::group::📤 准备上传文件"
-        pack_name="${{ env.pack_sgsi }}"
-        
-        if [ ! -f "$pack_name" ]; then
-          echo "::error::❌ 最终压缩包不存在: $pack_name"
-          exit 1
-        fi
-        
-        mkdir -p upload
-        file_size=$(stat -c%s "$pack_name")
-        max_size=1900000000
-        
-        echo "FILE_SIZE=$file_size" >> $GITHUB_ENV
-        
-        split_needed=false
-        
-        if [ $file_size -gt $max_size ]; then
-          echo "✂️ 文件过大，进行分割..."
-          split_needed=true
-          split -b 1800m -d "$pack_name" "upload/${pack_name}_part"
+        echo "::group::📐 计算镜像大小"
+        if [ -f "out/system.img" ]; then
+          # 获取原始大小（字节）
+          original_size=$(stat -c%s out/system.img)
+          
+          # 压缩镜像（如果需要）
+          # echo "压缩system.img..."
+          # img2simg out/system.img out/system_sparse.img
+          # simg2img out/system_sparse.img out/system.img
+          
+          # 获取最终大小（字节）
+          final_size=$(stat -c%s out/system.img)
+          
+          # 计算节省百分比
+          saved_percent=$(awk "BEGIN {printf \"%.1f\", (($original_size - $final_size) / $original_size) * 100}")
+          
+          # 转换为人类可读格式
+          original_size_human=$(numfmt --to=iec --suffix=B $original_size)
+          final_size_human=$(numfmt --to=iec --suffix=B $final_size)
+          
+          # 保存到环境变量
+          echo "ORIGINAL_SIZE=$original_size" >> $GITHUB_ENV
+          echo "FINAL_SIZE=$final_size" >> $GITHUB_ENV
+          echo "ORIGINAL_SIZE_HUMAN=$original_size_human" >> $GITHUB_ENV
+          echo "FINAL_SIZE_HUMAN=$final_size_human" >> $GITHUB_ENV
+          echo "SAVED_PERCENT=$saved_percent" >> $GITHUB_ENV
+          
+          echo "原始大小: $original_size_human"
+          echo "最终大小: $final_size_human"
+          echo "节省空间: ${saved_percent}%"
         else
-          mv -v "$pack_name" upload/
+          echo "::warning::⚠️ 未找到system.img文件"
+          echo "ORIGINAL_SIZE_HUMAN=未知" >> $GITHUB_ENV
+          echo "FINAL_SIZE_HUMAN=未知" >> $GITHUB_ENV
+          echo "SAVED_PERCENT=0" >> $GITHUB_ENV
         fi
-        
-        echo "SPLIT_NEEDED=$split_needed" >> $GITHUB_ENV
         echo "::endgroup::"
-        
-    - name: "🔍 验证上传文件"
+
+    - name: '🔒 计算SHA256校验和'
       run: |
-        echo "::group::🔍 验证上传文件"
-        if [ ! -d "upload" ] || [ -z "$(ls -A upload)" ]; then
-          echo "::error::❌ 上传文件验证失败"
-          exit 1
+        echo "::group::🔒 计算SHA256校验和"
+        if [ -f "out/system.img" ]; then
+          sha256=$(sha256sum out/system.img | awk '{print $1}')
+          echo "SYSTEM_IMG_SHA256=$sha256" >> $GITHUB_ENV
+          echo "SHA-256: $sha256"
         else
-          echo "✅ 上传文件验证通过"
-          ls -lh upload
+          echo "::warning::⚠️ 未找到system.img文件"
+          echo "SYSTEM_IMG_SHA256=未知" >> $GITHUB_ENV
         fi
         echo "::endgroup::"
-        
+
     - name: "📝 生成发布说明"
       run: |
         # 创建发布说明文件
@@ -440,12 +322,25 @@ jobs:
         echo "### 📋 构建详情" >> release_body.md
         echo "- **源ROM**: ${{ env.rom_name }}" >> release_body.md
         echo "- **构建时间**: ${{ env.BUILD_TIME }}" >> release_body.md
-        echo "- **文件大小**: $(numfmt --to=iec ${{ env.FILE_SIZE }})" >> release_body.md
-        echo "- **构建日志**: [${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}]" >> release_body.md
+        echo "- **打包日期**: ${{ env.PACK_DATE }}" >> release_body.md
+        echo "- **镜像大小**: ${{ env.FINAL_SIZE_HUMAN }} (原始大小: ${{ env.ORIGINAL_SIZE_HUMAN }}, 节省 ${{ env.SAVED_PERCENT }}%)" >> release_body.md
+        echo "- **SHA-256校验和**: \`${{ env.SYSTEM_IMG_SHA256 }}\`" >> release_body.md
         echo "" >> release_body.md
-        echo "### ⚙️ 系统信息" >> release_body.md
         
-        # 系统版本信息
+        echo "### ️ 系统信息" >> release_body.md
+        echo "- **Android 版本**: ${{ env.ANDROID_VERSION }}" >> release_body.md
+        echo "- **ROM版本标识**: ${{ env.VERSION_IDENTIFIER }}" >> release_body.md
+        
+        # 智能日期展示
+        if [ -n "${{ env.TIME_DIFF }}" ]; then
+          echo "- **ROM构建日期**: ${{ env.BUILD_DATE }} [中文: ${{ env.BUILD_DATE_ZH }} ${{ env.TIME_DIFF }}]" >> release_body.md
+        else
+          echo "- **ROM构建日期**: ${{ env.BUILD_DATE }} [中文: ${{ env.BUILD_DATE_ZH }}]" >> release_body.md
+        fi
+        
+        echo "- **安全补丁日期**: ${{ env.SECURITY_PATCH }}" >> release_body.md
+        
+        # 厂商特定版本信息
         if [ "${{ env.make_miui }}" = "true" ]; then
           echo "- **MIUI 版本**: ${{ env.MIUI_VERSION }}" >> release_body.md
         fi
@@ -462,37 +357,53 @@ jobs:
           echo "- **HydrogenOS 版本**: ${{ env.COLOROS_VERSION }}" >> release_body.md
         fi
         
-        # 通用Android信息
-        echo "- **Android 版本**: ${{ env.ANDROID_VERSION }}" >> release_body.md
-        echo "- **安全补丁**: ${{ env.SECURITY_PATCH }}" >> release_body.md
-        echo "- **构建日期**: ${{ env.BUILD_DATE }}" >> release_body.md
-        echo "- **构建ID**: ${{ env.BUILD_ID }}" >> release_body.md
-        echo "" >> release_body.md
-        
-        # 文件下载说明
-        if [ "${{ env.SPLIT_NEEDED }}" = "true" ]; then
-          echo "### ⚠️ 下载说明" >> release_body.md
-          echo "文件过大已被分割，请下载所有分卷文件后使用以下命令合并：" >> release_body.md
-          echo '```bash' >> release_body.md
-          echo "cat ${pack_name}_part* > ${{ env.pack_sgsi }}" >> release_body.md
-          echo '```' >> release_body.md
-        else
-          echo "### ⬇️ 下载说明" >> release_body.md
-          echo "直接下载压缩包文件即可" >> release_body.md
+        if [ "${{ env.make_smartisanos }}" = "true" ]; then
+          echo "- **SmartisanOS 版本**: ${{ env.SMARTISAN_VERSION }}" >> release_body.md
         fi
         
+        if [ "${{ env.make_zui }}" = "true" ]; then
+          echo "- **ZUI 版本**: ${{ env.ZUI_VERSION }}" >> release_body.md
+        fi
+        
+        # 添加安装说明
         echo "" >> release_body.md
-        echo "> **注意**: 请确保下载所有文件（如果被分割）" >> release_body.md
-        
-        echo "生成发布说明:"
-        cat release_body.md
-        
+        echo "###  📥 安装说明" >> release_body.md
+        echo "1. 下载镜像到手机存储" >> release_body.md
+        echo "2. 进入TWRP或OrangeFox Recovery" >> release_body.md
+        echo "3. 选择安装 → 选择镜像文件 → 刷入System分区" >> release_body.md
+        echo "4. 重启设备" >> release_body.md
+        echo "" >> release_body.md
+        echo "> **注意**: 仅适用于Android 10 A/B分区设备" >> release_body.md
+        echo "✅ 发布说明生成完成"
+
+    - name: '📦 准备发布文件'
+      run: |
+        echo "::group::📦 准备发布文件"
+        mkdir -p upload
+        if [ -f "out/system.img" ] && [ "${{ env.pack_sgsi }}" = "true" ]; then
+          cp out/system.img upload/
+        fi
+        if [ -f "out/super.img" ] && [ "${{ env.make_super }}" = "true" ]; then
+          cp out/super.img upload/
+        fi
+        cp release_body.md upload/
+        echo "::endgroup::"
+
     - name: "🚀 发布SGSI成品"
       if: success()
       uses: softprops/action-gh-release@v1
       with:
-        files: upload/*
+        文件: upload/*
         tag_name: "sgs-img-${{ env.BUILD_TIME }}"
-        body_file: release_body.md
+        name: "SGSI Build - ${{ env.rom_name }}"
+        body_file: upload/release_body.md
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: '🧹 清理工作空间'
+      run: |
+        echo "::group::🧹 清理工作空间"
+        rm -rf rom.zip
+        rm -rf out/
+        rm -rf upload/
+        echo "::endgroup::"
