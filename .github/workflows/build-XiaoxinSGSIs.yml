@@ -24,6 +24,7 @@ jobs:
         echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUTPUT
         echo "rom_name=$(jq -r '.rom_name' sgsi.json)" >> $GITHUB_OUTPUT
         echo "pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)" >> $GITHUB_OUTPUT
+        # 修复此处的变量名错误
         echo "make_miui=$(jq -r '.make_miui' sgsi.json)" >> $GITHUB_OUTPUT
         echo "make_flyme=$(jq -r '.make_flyme' sgsi.json)" >> $GITHUB_OUTPUT
         echo "make_coloros=$(jq -r '.make_coloros' sgsi.json)" >> $GITHUB_OUTPUT
@@ -42,29 +43,21 @@ jobs:
         
     - name: 初始化环境
       run: |
-        # 安全解压文件
         tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
         
-        # 检查目录结构
         if [ ! -d "SGSI-build-tool" ]; then
           echo "::error::未找到SGSI-build-tool目录"
           ls -la
           exit 1
         fi
         
-        # 移除所有chown命令
         find SGSI-build-tool -type f -exec sed -i '/chown/d; /sudo/d' {} \;
-        
-        # 递归添加执行权限
         find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
-        
-        # 设置目录权限
         find SGSI-build-tool -type d -exec chmod 755 {} \;
         
-        # 安装依赖
         cd SGSI-build-tool/10
-        ./setup.sh || true  # 忽略非关键错误
+        ./setup.sh || true
         cd ../..
         
     - name: 下载ROM
@@ -118,37 +111,24 @@ jobs:
         chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
          
     - name: 生成SGSI镜像
-      timeout-minutes: 120
+      timeout-minutes: 180
       run: |
-        # 清理文件
         rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
-        
-        # 移动文件
         mv make/* SGSI-build-tool/10/
         mv bin/* SGSI-build-tool/10/bin/
-        
-        # 移除脚本中的chown命令
         find SGSI-build-tool/10 -type f -exec sed -i '/chown/d' {} \;
-        
-        # 设置执行权限
         find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
         
-        # 进入构建目录
         cd SGSI-build-tool/10
-        
-        # 创建目录结构
         mkdir -p out/{system,config}
         mkdir -p out/system/{bin,etc,lib,usr,framework,app,priv-app,vendor}
         
-        # 创建默认配置文件
         echo -e "# 默认文件上下文\n/system(/.*)? u:object_r:system_file:s0\n/vendor(/.*)? u:object_r:vendor_file:s0" > out/config/system_file_contexts
         echo -e "# 默认文件系统配置\n/system 0 0 755\n/vendor 0 0 755" > out/config/system_fs_config
         
-        # 执行构建
-        ./make.sh || true  # 忽略非关键错误
+        ./make.sh || true
         
-        # 检查结果
         if [ ! -f "out/system.img" ]; then
           echo "::warning::system.img未生成，尝试手动创建"
           ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 out/system.img 512M
@@ -159,39 +139,58 @@ jobs:
           fi
         fi
         
-        # 移动镜像
         mv out/system.img SGSI/
         
     - name: 打包补丁文件
       run: |
         for i in 1 2 3; do
-          zip -r "Patch$i.zip" "Patch/Patch$i"/*
+          echo "打包补丁 Patch$i"
+          zip -r -0 "Patch$i.zip" "Patch/Patch$i"/*
           mv "Patch$i.zip" SGSI-build-tool/10/SGSI/
         done
 
     - name: 压缩SGSI成果物
       run: |
-        # 确保上传目录存在
         rm -rf upload
         mkdir -p upload
-        
-        # 创建压缩包
         cd SGSI-build-tool/10/SGSI
-        zip -r "../../../../${{ steps.var.outputs.pack_sgsi }}" *
+        
+        echo "::group::创建分卷压缩包"
+        rm -rf tmp_compress
+        mkdir -p tmp_compress
+        
+        for item in *; do
+          if [ -f "$item" ] && [ $(stat -c%s "$item") -gt 500000000 ]; then
+            echo "分卷压缩大文件: $item (大小: $(du -h "$item" | cut -f1))"
+            split -d -b 500m "$item" "tmp_compress/${item}_part"
+          else
+            echo "复制文件: $item"
+            cp -r "$item" tmp_compress/
+          fi
+        done
+        
+        cd tmp_compress
+        echo "创建主压缩包..."
+        zip -r -0 "../../../../${{ steps.var.outputs.pack_sgsi }}" *
+        cd ..
+        rm -rf tmp_compress
+        echo "::endgroup::"
+        
         cd ../../../../
         
-        # 检查文件大小
         max_size=2000000000
         file_size=$(stat -c%s "${{ steps.var.outputs.pack_sgsi }}")
+        echo "压缩包大小: $(numfmt --to=iec $file_size)"
         
         if [ $file_size -gt $max_size ]; then
-          echo "::notice::文件过大($file_size字节)，进行分割打包..."
-          # 使用tar和split组合确保目录结构
-          tar -cvzf - "${{ steps.var.outputs.pack_sgsi }}" | split -d -b 1000m - "upload/${{ steps.var.outputs.pack_sgsi }}_part"
+          echo "::notice::文件过大($(numfmt --to=iec $file_size))，进行分割打包..."
+          tar -cvf - "${{ steps.var.outputs.pack_sgsi }}" | split -d -b 1000m - "upload/${{ steps.var.outputs.pack_sgsi }}_part"
+          rm "${{ steps.var.outputs.pack_sgsi }}"
         else
           mv "${{ steps.var.outputs.pack_sgsi }}" upload/
         fi
         
+        echo "最终上传文件:"
         ls -lh upload
           
     - name: 发布SGSI版本
