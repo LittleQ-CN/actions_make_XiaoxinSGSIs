@@ -1,4 +1,4 @@
-name: build_XiaoxinSGSIs
+name: Build_XiaoxinSGSIs_For_A10_AB
 
 on:
   watch:
@@ -10,15 +10,15 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-    - name: 检出代码库
+    - name: "📥 检出代码库"
       uses: actions/checkout@v3
       
-    - name: 清理工作区
+    - name: "🧹 清理工作区"
       run: |
         rm -rf SGSI-build-tool upload || true
         df -h
         
-    - name: 读取配置文件
+    - name: "📝 读取配置文件"
       id: var
       run: |
         # 从sgsi.json读取配置
@@ -45,7 +45,7 @@ jobs:
         echo "make_zui=$make_zui" >> $GITHUB_ENV
         echo "make_super=$make_super" >> $GITHUB_ENV
         
-    - name: 下载构建工具
+    - name: "⬇️ 下载构建工具"
       run: |
         # 使用curl静默下载
         if command -v curl &> /dev/null; then
@@ -55,121 +55,126 @@ jobs:
         fi
         
         if [ ! -f SGSI-build-tool.tar ]; then
-          echo "::error::工具包下载失败"
+          echo "::error::❌ 工具包下载失败"
           exit 1
         fi
         
-    - name: 设置构建环境
+    - name: "⚙️ 设置构建环境"
       run: |
         tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
         
         if [ ! -d "SGSI-build-tool" ]; then
-          echo "::error::未找到SGSI-build-tool目录"
+          echo "::error::❌ 未找到SGSI-build-tool目录"
           ls -la
           exit 1
         fi
         
-        # 移除权限相关的命令
-        find SGSI-build-tool -type f -exec sed -i '/chown/d; /sudo/d' {} \;
-        
         # 设置执行权限
         find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
-        find SGSI-build-tool -type d -exec chmod 755 {} \;
         
         # 初始化环境
         cd SGSI-build-tool/10
         ./setup.sh || true
         cd ../..
-        
-    - name: 下载ROM文件 (多方式静默下载)
+    
+    - name: "📥 下载ROM文件"
       run: |
         mkdir -p SGSI-build-tool/10/tmp
         rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
         
-        echo "正在下载ROM文件: ${{ env.rom_name }}"
-        
-        # 方法1: 使用curl静默下载
+        # 方法1: 使用curl下载
         if command -v curl &> /dev/null; then
-          echo "使用curl下载..."
-          curl -L -k -sS -C - "${{ env.rom_url }}" -o "$rom_path" && download_success=true || curl_ret=$?
+          curl -L -k -sS -C - "${{ env.rom_url }}" -o "$rom_path" || true
         fi
         
         # 方法2: 如果curl失败或未安装，使用wget
         if [ ! -f "$rom_path" ] && command -v wget &> /dev/null; then
-          echo "使用wget下载..."
-          wget -q -c "${{ env.rom_url }}" -O "$rom_path" && download_success=true || wget_ret=$?
+          wget -q -c "${{ env.rom_url }}" -O "$rom_path" || true
         fi
         
         # 检查是否下载成功
-        if [ ! -f "$rom_path" ]; then
-          echo "::error::ROM文件下载失败"
-          echo "curl退出码: ${curl_ret:-未使用}"
-          echo "wget退出码: ${wget_ret:-未使用}"
+        if [ ! -f "$极速版rom_path" ]; then
+          echo "::error::❌ ROM文件下载失败"
           exit 1
         else
-          echo "ROM文件下载成功"
-          echo "文件大小: $(du -sh "$rom_path" | cut -f1)"
-          echo "下载方式: ${download_success:+${curl_ret+curl}${wget_ret+wget}}"
+          echo "✅ ROM文件下载成功! 文件大小: $(du -sh "$rom_path" | cut -f1)"
         fi
     
-    - name: 启用Super分区支持
+    - name: "✨ 启用Super分区支持"
       if: ${{ env.make_super == 'true' }}
-      run: sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
+      run: |
+        echo "🔓 启用Super分区支持"
+        sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
     
-    - name: 生成MIUI镜像
-      if: ${{ env.make_miui == 'true' }}
+    - name: "🏭 生成厂商系统镜像"
       run: |
-        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
-        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+        # 根据配置生成对应的厂商系统镜像
+        if [ "${{ env.make_miui }}" = "true" ]; then
+          echo "⚙️ 配置MIUI构建 - 小米深度定制系统"
+          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+          echo "✅ 小米MIUI配置完成 | 特色: 小爱同学、MIUI优化"
+        fi
         
-    - name: 生成Flyme镜像
-      if: ${{ env.make_flyme == 'true' }}
-      run: |
-        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
-        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+        if [ "${{ env.make_flyme }}" = "true" ]; then
+          echo "⚙️ 配置Flyme构建 - 魅族标志性系统"
+          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+          echo "✅ 魅族Flyme配置完成 | 特色: mBack交互、小窗模式"
+        fi
         
-    - name: 生成ColorOS镜像
-      if: ${{ env.make_coloros == 'true' }}
-      run: |
-        python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ env.rom_name }}
-        rm -f SGSI-build-tool/10/tmp/${{ env.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+        if [ "${{ env.make_coloros }}" = "true" ]; then
+          echo "⚙️ 配置ColorOS构建 - OPPO & realme 共享系统平台"
+          python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ env.rom_name }}
+          rm -f SGSI-build-tool/10/tmp/${{ env.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+          echo "✅ OPPO/realme ColorOS配置完成 | 特色: 闪回键、AI美颜、游戏空间"
+        fi
         
-    - name: 生成HydrogenOS镜像
-      if: ${{ env.make_h2os == 'true' }}
-      run: |
-        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+        if [ "${{ env.make_h2os }}" = "true" ]; then
+          echo "⚙️ 配置HydrogenOS构建 - 一加海外版轻量化系统"
+          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+          echo "✅ 一加HydrogenOS配置完成 | 特色: 类原生体验、流畅稳定"
+        fi
         
-    - name: 生成SmartisanOS镜像
-      if: ${{ env.make_smartisanos == 'true' }}
-      run: |
-        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+        if [ "${{ env.make_smartisanos }}" = "true" ]; then
+          echo "⚙️ 配置SmartisanOS构建 - 锤子科技匠心系统"
+          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+          echo "✅ 锤子SmartisanOS配置完成 | 特色: 大爆炸、一步功能"
+        fi
         
-    - name: 生成ZUI镜像
-      if: ${{ env.make_zui == 'true' }}
-      run: |
-        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
-        mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
-        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+        if [ "${{ env.make_zui }}" = "true" ]; then
+          echo "⚙️ 配置ZUI构建 - 联想多设备协同系统"
+          rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+          echo "✅ 联想ZUI配置完成 | 特色: U-Touch手势、电脑模式"
+        fi
+        
+        if [ "${{ env.make_miui }}" != "true" ] && \
+           [ "${{ env.make_flyme }}" != "true" ] && \
+           [ "${{ env.make_coloros }}" != "true" ] && \
+           [ "${{ env.make_h2os }}" != "true" ] && \
+           [ "${{ env.make_smartisanos }}" != "true" ] && \
+           [ "${{ env.make_zui }}" != "true" ]; then
+          echo "⚠️ 警告: 未配置任何厂商系统镜像生成"
+        fi
          
-    - name: 构建SGSI系统镜像
+    - name: "🔨 构建SGSI系统镜像"
       timeout-minutes: 120
       run: |
         # 准备构建环境
         rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
         mv make/* SGSI-build-tool/10/
         mv bin/* SGSI-build-tool/10/bin/
-        
-        # 移除权限相关命令
-        find SGSI-build-tool/10 -type f -exec sed -i '/chown/d' {} \;
         
         # 设置执行权限
         find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
@@ -184,29 +189,29 @@ jobs:
         echo -e "# 默认文件上下文\n/system(/.*)? u:object_r:system_file:s0\n/vendor(/.*)? u:object_r:vendor_file:s0" > out/config/system_file_contexts
         echo -e "# 默认文件系统配置\n/system 0 0 755\n/vendor 0 0 755" > out/config/system_fs_config
         
-        # 执行构建并处理sdat2img输出
-        echo "::group::构建日志"
+        # 执行构建
+        echo "::group::📜 构建日志"
         build_output=$(./make.sh 2>&1 || true)
         echo "$build_output"
         
-        # 检测Android版本信息 - 专注ext4格式转换
+        # 检测Android版本信息
         if echo "$build_output" | grep -q "Android Nougat 7.x / Oreo 8.x detected"; then
-          echo "::notice::检测到Android 7.x/8.x ROM（ext4格式），正在转换系统镜像..."
+          echo "🔄 检测到Android 7.x/8.x ROM（ext4格式），正在转换系统镜像..."
         fi
         
         # 检查转换错误
         if echo "$build_output" | grep -q "sdat2img: failed"; then
-          echo "::error::sdat2img转换失败"
+          echo "::error::❌ sdat2img转换失败"
           exit 1
         fi
         echo "::endgroup::"
         
         # 验证构建结果
         if [ ! -f "out/system.img" ]; then
-          echo "::warning::system.img未生成，尝试手动创建"
+          echo "::warning::⚠️ system.img未生成，尝试手动创建"
           
           if [ ! -d "out/system" ]; then
-            echo "::error::out/system目录不存在，无法创建镜像"
+            echo "::error::❌ out/system目录不存在，无法创建镜像"
             exit 1
           fi
           
@@ -216,12 +221,12 @@ jobs:
           img_size_mb=$((img_size_kb / 1024))
           [ $img_size_mb -lt 512 ] && img_size_mb=512
           
-          echo "创建 ${img_size_mb}MB 镜像"
+          echo "📦 创建 ${img_size_mb}MB 镜像"
           ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 out/system.img ${img_size_mb}M
           ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config -S out/config/system_file_contexts -f out/system/ -a /system out/system.img
           
           if [ ! -f "out/system.img" ]; then
-            echo "::error::无法生成system.img"
+            echo "::error::❌ 无法生成system.img"
             exit 1
           fi
         fi
@@ -229,118 +234,196 @@ jobs:
         # 移动生成的文件
         mkdir -p SGSI
         mv out/system.img SGSI/
-        cd ../../../
+        cd ../../
         
-    - name: 打包系统补丁
+    - name: "📦 打包系统补丁"
       run: |
         for i in 1 2 3; do
           if [ -d "Patch/Patch$i" ]; then
-            echo "打包补丁 Patch$i"
+            echo "📦 打包补丁包 Patch$i"
             zip -r -0 "Patch$i.zip" "Patch/Patch$i"/*
             mkdir -p SGSI-build-tool/10/SGSI
             mv "Patch$i.zip" SGSI-build-tool/10/SGSI/
           fi
         done
 
-    - name: 创建最终包
+    - name: "📦 创建最终包"
       run: |
-        echo "::group::创建最终包"
+        echo "::group::📦 创建最终包"
         # 确保SGSI目录存在
         mkdir -p SGSI-build-tool/10/SGSI
         
         # 检查目录内容
-        echo "SGSI目录内容:"
         ls -lh SGSI-build-tool/10/SGSI/
         
         # 确保有文件存在
         if [ -z "$(ls -A SGSI-build-tool/10/SGSI/* 2>/dev/null)" ]; then
-          echo "::error::SGSI目录为空，无法创建压缩包"
+          echo "::error::❌ SGSI目录为空，无法创建压缩包"
           exit 1
         fi
         
         # 创建压缩包
         pack_name="${{ env.pack_sgsi }}"
-        echo "创建压缩包: $pack_name"
-        
-        # 直接在工作区根目录创建压缩包
         zip -r -0 "$pack_name" SGSI-build-tool/10/SGSI/*
         
         # 检查压缩包
         if [ ! -f "$pack_name" ]; then
-          echo "::error::压缩包创建失败: $pack_name"
-          ls -lh  # 显示当前目录内容以便调试
+          echo "::error::❌ 压缩包创建失败: $pack_name"
+          ls -lh
           exit 1
         fi
         
-        echo "压缩包大小: $(du -sh "$pack_name" | cut -f1)"
+        echo "✅ 压缩包创建成功! 大小: $(du -sh "$pack_name" | cut -f1)"
         echo "::endgroup::"
         
-    - name: 准备上传文件
+    - name: "⏱️ 生成时间戳"
+      id: timestamp
       run: |
-        echo "::group::准备上传文件"
+        echo "BUILD_TIME=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_ENV
+        echo "time=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+        
+    - name: "📤 准备上传文件"
+      run: |
+        echo "::group::📤 准备上传文件"
         pack_name="${{ env.pack_sgsi }}"
         
-        # 确保压缩包存在 (直接在工作区根目录查找)
+        # 确保压缩包存在
         if [ ! -f "$pack_name" ]; then
-          echo "::error::最终压缩包不存在: $pack_name"
-          echo "当前目录内容:"
-          ls -lh  # 显示当前目录内容以便调试
+          echo "::error::❌ 最终压缩包不存在: $pack_name"
+          ls -lh
           exit 1
         fi
         
         # 创建上传目录
         mkdir -p upload
-        echo "上传目录路径: $(pwd)/upload"
+        echo "📁 上传目录路径: $(pwd)/upload"
         
         # 检查文件大小
         file_size=$(stat -c%s "$pack_name")
-        max_size=1500000000  # 1.5GB
+        max_size=1900000000  # 1.9GB (GitHub Releases最大支持2GB文件)
         
-        echo "压缩包大小: $(numfmt --to=iec $file_size)"
+        echo "📦 压缩包大小: $(numfmt --to=iec $file_size)"
+        
+        # 设置分割标志
+        split_needed=false
         
         if [ $file_size -gt $max_size ]; then
-          echo "文件过大，进行分割..."
+          echo "✂️ 文件过大，进行分割..."
+          split_needed=true
           
-          # 计算分割大小 (1.4GB)
-          split_size=1400m
+          # 计算分割大小 (1.8GB)，确保每个文件小于2GB限制
+          split_size=1800m
           
           # 分割文件
           split -b $split_size -d "$pack_name" "upload/${pack_name}_part"
           
-          echo "分割完成，上传目录内容:"
+          echo "✅ 分割完成，上传目录内容:"
           ls -lh upload/
         else
-          echo "移动单个压缩包到upload目录"
+          echo "➡️ 移动单个压缩包到upload目录"
           mv -v "$pack_name" upload/
           
-          echo "上传目录内容:"
+          echo "📋 上传目录内容:"
           ls -lh upload/
         fi
+        
+        # 保存分割标志到环境变量
+        echo "SPLIT_NEEDED=$split_needed" >> $GITHUB_ENV
         echo "::endgroup::"
         
-    - name: 验证上传文件
+    - name: "🔍 验证上传文件"
       run: |
-        echo "::group::验证上传文件"
+        echo "::group::🔍 验证上传文件"
         # 检查上传目录是否存在
         if [ ! -d "upload" ]; then
-          echo "::error::上传目录不存在"
+          echo "::error::❌ 上传目录不存在"
           exit 1
         fi
         
         # 检查是否有文件
         if [ -z "$(ls -A upload)" ]; then
-          echo "::error::上传目录为空!"
+          echo "::error::❌ 上传目录为空!"
           exit 1
         else
-          echo "上传文件列表 ($(ls upload | wc -l) 个文件):"
+          file_count=$(ls upload | wc -l)
+          echo "✅ 上传文件验证通过 ($file_count 个文件):"
           ls -lh upload
         fi
         echo "::endgroup::"
           
-    - name: 发布SGSI版本
-      uses: ncipollo/release-action@v1.8.6
+    - name: "🚀 发布SGSI成品"
+      if: success()
+      uses: softprops/action-gh-release@v1
       with:
-        artifacts: 'upload/*'
-        name: xiaoxinSGSI-ab-Android10-unpack
-        tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}
-        token: ${{ secrets.GITHUB_TOKEN }}
+        files: upload/*
+        tag_name: "sgs-img-${{ env.BUILD_TIME }}"
+        body: |
+          ##  🌟 SGSI镜像构建成功
+          
+          ###  📋 构建详情
+          - **源ROM**: ${{ env.rom_name }}
+          - **构建时间**: ${{ steps.timestamp.outputs.time }}
+          - **文件大小**: $(numfmt --to=iec $file_size)
+          ${{ env.SPLIT_NEEDED == 'true' && '- **文件状态**: 已分割为多个部分' || '- **文件状态**: 单个文件' }}
+          - **构建日志**: [查看详情](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          ## 📦 解压指南
+          ${{ env.SPLIT_NEEDED == 'true' && '###  ✂️ 分割文件解压方法：' || '###  📄 单文件解压方法：' }}
+          
+          ${{ env.SPLIT_NEEDED == 'true' && '####  💻 电脑端（Windows/Linux/macOS）：
+          **推荐软件**: 
+          - 7-Zip (Windows) https://www.7-zip.org/
+          - The Unarchiver (macOS) https://theunarchiver.com/
+          - PeaZip (跨平台) https://peazip.github.io/
+          
+          操作步骤：
+          1. 下载所有 `' + env.pack_sgsi + '_part*` 文件到同一目录
+          2. 打开终端/命令提示符，进入该目录
+          3. 执行合并命令：
+          ```bash
+          # Windows:
+          copy /B ' + env.pack_sgsi + '_part* ' + env.pack_sgsi + '
+          
+          # Linux/macOS:
+          cat ' + env.pack_sgsi + '_part* > ' + env.pack_sgsi + '
+          ```
+          4. 使用推荐软件解压合并后的文件
+          
+          ####  📱 手机端（Android）：
+          **推荐应用**: 
+          - ZArchiver Pro (专业版支持分割文件合并) https://play.google.com/store/apps/details?id=ru.zdevs.zarchiver.pro
+          - RAR https://play.google.com/store/apps/details?id=com.rarlab.rar
+          
+          操作步骤：
+          1. 安装ZArchiver Pro
+          2. 下载所有分割文件到同一目录
+          3. 打开ZArchiver → 找到分割文件目录
+          4. 长按第一个文件(`' + env.pack_sgsi + '_part00`) → 解压 → 自动合并所有部分
+          5. 解压生成的完整ZIP文件' || '#### 💻 电脑端：
+          **推荐软件**: 
+          - Bandizip (Windows) https://www.bandisoft.com/bandizip/
+          - Keka (macOS) https://www.keka.io/
+          - p7zip (Linux) https://www.7-zip.org/
+          
+          操作步骤：
+          1. 下载安装推荐软件
+          2. 右键点击ZIP文件 → 选择"解压到当前文件夹"
+          或使用命令行: 
+          ```bash
+          unzip ' + env.pack_sgsi + '
+          ```
+          
+          #### 📱 手机端：
+          **推荐应用**: 
+          - ZArchiver https://play.google.com/store/apps/details?id=ru.zdevs.zarchiver
+          - RAR for Android https://play.google.com/store/apps/details?id=com.rarlab.rar
+          
+          操作步骤：
+          1. 安装推荐应用
+          2. 找到下载的ZIP文件
+          3. 长按文件 → 解压 → 选择目标目录' }}
+          
+          > **注意**: 解压后请仔细阅读压缩包内的README文件获取刷机说明
+          > **提示**: 如果遇到解压问题，请确保下载了所有部分（分割文件）
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
