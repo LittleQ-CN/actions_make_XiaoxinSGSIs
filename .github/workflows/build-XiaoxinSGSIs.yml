@@ -8,13 +8,15 @@ env:
   BUILD_TOOL_VERSION: "v1.9"
   BUILD_TOOL_URL: "https://github.com/xiaoxindada/SGSI-build-tool/releases/download/$BUILD_TOOL_VERSION/SGSI-build-tool.tar"
   BUILD_DIR: "SGSI-build-tool/10"
-  ROM_DIR: "${{ env.BUILD_DIR }}/tmp"
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
     timeout-minutes: 180
+    
+    env:
+      ROM_DIR: "SGSI-build-tool/10/tmp"
 
     steps:
     - name: 检出代码库
@@ -39,7 +41,7 @@ jobs:
         config[pack_sgsi]=$(jq -r '.pack_sgsi' sgsi.json)
         config[make_miui]=$(jq -r '.make_miui' sgsi.json)
         config[make_flyme]=$(jq -r '.make_flyme' sgsi.json)
-        config[make_coloros]=$(jq -r '.make_coloros' sg极速下载.json)
+        config[make_coloros]=$(jq -r '.make_coloros' sgsi.json)
         config[make_h2os]=$(jq -r '.make_h2os' sgsi.json)
         config[make_smartisanos]=$(jq -r '.make_smartisanos' sgsi.json)
         config[make_zui]=$(jq -r '.make_zui' sgsi.json)
