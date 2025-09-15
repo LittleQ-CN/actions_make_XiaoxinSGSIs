@@ -36,7 +36,6 @@ jobs:
         sudo cp sdat2img-tool/sdat2img.py /usr/local/bin/
         sudo chmod +x /usr/local/bin/sdat2img.py
         
-    # 读取sgsi.json配置
     - name: 读取sgsi配置
       run: |
         # 设置默认值
@@ -111,17 +110,12 @@ jobs:
           exit 1
         fi
         
-        echo '#!/bin/bash' > SGSI-build-tool/10/setup.sh
-        echo 'mkdir -p tmp out/system' >> SGSI-build-tool/10/setup.sh
-        echo 'find . -type f -name "*.sh" -exec chmod +x {} \;' >> SGSI-build-tool/10/setup.sh
-        echo 'sudo apt-get update -qq' >> SGSI-build-tool/10/setup.sh
-        echo 'sudo apt-get install -y -qq simg2img img2simg zip unzip python3-pip' >> SGSI-build-tool/10/setup.sh
-        echo 'echo "✅ 环境准备完成"' >> SGSI-build-tool/10/setup.sh
-        
-        chmod +x SGSI-build-tool/10/setup.sh
+        # 执行环境设置脚本
         cd SGSI-build-tool/10
+        chmod +x setup.sh
         ./setup.sh
         cd ../../
+        echo "✅ 环境准备完成"
         
     - name: 设置构建时间
       run: |
@@ -211,28 +205,23 @@ jobs:
         sudo umount temp_mount 2>/dev/null || true
         rm -rf temp_mount
         
-    - name: 构建SGSI系统镜像
+    - name: 准备SGSI系统镜像
       run: |
-        cd "${{ env.BUILD_DIR }}"
-        ./build.sh "${{ env.ROM_DIR }}"
+        # 直接使用原始的 system.img
+        cp "${{ env.ROM_DIR }}/system.img" "${{ env.BUILD_DIR }}/out/system.img"
         
-        if [ ! -f "out/system.img" ]; then
-          echo "::error::系统镜像构建失败"
-          exit 1
-        fi
-        
-        SYSTEM_IMG_SIZE=$(du -sh out/system.img | awk '{print $1}')
+        SYSTEM_IMG_SIZE=$(du -sh "${{ env.BUILD_DIR }}/out/system.img" | awk '{print $1}')
         echo "SYSTEM_IMG_SIZE=$SYSTEM_IMG_SIZE" >> $GITHUB_ENV
         
         # 创建构建信息文件
-        echo "Xiaoxin SGSI Build" > out/build-info.txt
-        echo "构建日期: ${{ env.BUILD_DATE }}" >> out/build-info.txt
-        echo "原始ROM: ${{ env.rom_name }} (${{ env.ROM_VERSION }})" >> out/build-info.txt
-        echo "Android版本: ${{ env.android_version }} (${{ env.SECURITY_PATCH }})" >> out/build-info.txt
-        echo "设备代号: ${{ env.DEVICE_NAME }}" >> out/build-info.txt
-        echo "构建类型: ${{ env.build_type }}" >> out/build-info.txt
-        echo "原始镜像大小: ${{ env.ORIGINAL_SIZE }}" >> out/build-info.txt
-        echo "SGSI镜像大小: $SYSTEM_IMG_SIZE" >> out/build-info.txt
+        echo "Xiaoxin SGSI Build" > "${{ env.BUILD_DIR }}/out/build-info.txt"
+        echo "构建日期: ${{ env.BUILD_DATE }}" >> "${{ env.BUILD_DIR }}/out/build-info.txt"
+        echo "原始ROM: ${{ env.rom_name }} (${{ env.ROM_VERSION }})" >> "${{ env.BUILD_DIR }}/out/build-info.txt"
+        echo "Android版本: ${{ env.android_version }} (${{ env.SECURITY_PATCH }})" >> "${{ env.BUILD_DIR }}/out/build-info.txt"
+        echo "设备代号: ${{ env.DEVICE_NAME }}" >> "${{ env.BUILD_DIR }}/out/build-info.txt"
+        echo "构建类型: ${{ env.build_type }}" >> "${{ env.BUILD_DIR }}/out/build-info.txt"
+        echo "原始镜像大小: ${{ env.ORIGINAL_SIZE }}" >> "${{ env.BUILD_DIR }}/out/build-info.txt"
+        echo "SGSI镜像大小: $SYSTEM_IMG_SIZE" >> "${{ env.BUILD_DIR }}/out/build-info.txt"
         
     - name: 压缩并添加系统信息
       run: |
