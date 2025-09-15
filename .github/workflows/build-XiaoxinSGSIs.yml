@@ -125,6 +125,7 @@ jobs:
         
         ROM_SIZE=$(du -sh "$ROM_DIR/$rom_name" | awk '{print $1}')
         echo "✅ ROM下载完成 (大小: $ROM_SIZE)"
+        echo "ROM文件路径: $(pwd)/$ROM_DIR/$rom_name"
         
     - name: 处理ColorOS
       if: env.make_coloros == 'true'
@@ -141,37 +142,96 @@ jobs:
         echo "🖼️ 准备系统镜像..."
         cd $ROM_DIR
         
-        # 下载 sdat2img 脚本
+        # 下载 sdat2img 工具
         echo "📥 下载 sdat2img 工具..."
         curl -sLO https://raw.githubusercontent.com/xpirt/sdat2img/master/sdat2img.py
         chmod +x sdat2img.py
         echo "✅ sdat2img工具准备就绪"
         
-        # 解压ROM文件
-        unzip -q "$rom_name" || true
+        # 检查ROM文件是否存在
+        if [ ! -f "$rom_name" ]; then
+          echo "::error::未找到ROM文件: $rom_name"
+          ls -lAh
+          exit 1
+        fi
+        
+        # 解压ROM文件（使用7z替代unzip）
+        echo "解压当前目录的刷机包中......"
+        7z x "$rom_name" -y || {
+          echo "::warning::解压失败，尝试强制解压"
+          7z x -t* "$rom_name" -y -oextracted || {
+            echo "::error::无法解压ROM文件"
+            exit 1
+          }
+          # 查找解压后的内容
+          echo "移动解压文件..."
+          mv extracted/* . >/dev/null 2>&1 || true
+          mv extracted/.* . >/dev/null 2>&1 || true
+          rm -rf extracted
+        }
+        echo "解压完成"
         
         # 处理不同格式的system镜像
+        echo "搜索系统镜像..."
+        found_img=false
+        
+        # 情况1：直接存在system.img
         if [ -f "system.img" ]; then
           echo "🔍 找到system.img"
+          found_img=true
+        
+        # 情况2：存在压缩的dat文件
         elif [ -f "system.new.dat.br" ]; then
           echo "🧪 解压brotli格式..."
           brotli -d system.new.dat.br
           rm -f system.new.dat.br
+          found_img=true
+          
         elif [ -f "system.new.dat.xz" ]; then
           echo "🧪 解压xz格式..."
           xz -d system.new.dat.xz
-        fi
+          found_img=true
         
-        # 转换dat格式到img
-        if [ -f "system.new.dat" ] && [ -f "system.transfer.list" ]; then
+        # 情况3：需要转换dat文件
+        elif [ -f "system.new.dat" ] && [ -f "system.transfer.list" ]; then
           echo "🔧 转换dat到img..."
           python3 sdat2img.py system.transfer.list system.new.dat system.img
           rm -f system.new.dat system.transfer.list
+          found_img=true
         fi
         
-        # 检查镜像是否存在
-        [ -f "system.img" ] || { echo "::error::未找到有效的system.img"; exit 1; }
-        echo "✅ 系统镜像准备完成"
+        # 如果仍未找到，尝试深度搜索
+        if [ "$found_img" = false ]; then
+          echo "深度搜索system.img..."
+          system_path=$(find . -type f -name "system.img" | head -n1)
+          
+          if [ -n "$system_path" ]; then
+            echo "在子目录中找到system.img: $system_path"
+            mv "$system_path" .
+            found_img=true
+            
+            # 尝试移动其他相关文件
+            mv $(dirname "$system_path")/system.* . >/dev/null 2>&1 || true
+          fi
+          
+          # 检查system文件夹
+          if [ -d "system" ]; then
+            echo "🔍 找到system目录，尝试创建镜像..."
+            find system -print0 | sort -z | cpio -ov -0 -H newc | gzip -9 > system.img
+            found_img=true
+          fi
+        fi
+        
+        # 最终检查
+        if [ "$found_img" = true ] && [ -f "system.img" ]; then
+          SYSTEM_SIZE=$(du -sh system.img | awk '{print $1}')
+          echo "✅ 系统镜像准备完成 (大小: $SYSTEM_SIZE)"
+        else
+          echo "::error::未找到有效的system.img"
+          echo "当前目录内容:"
+          ls -lAhR
+          exit 1
+        fi
         
     - name: 提取版本信息
       run: |
@@ -180,23 +240,44 @@ jobs:
         
         # 尝试挂载系统镜像
         mkdir -p system_mount
-        sudo mount -t ext4 -o ro,loop system.img system_mount 2>/dev/null || true
+        sudo mount -t ext4 -o ro,loop system.img system_mount 2>/dev/null || {
+          echo "::warning::挂载失败，尝试其他方法"
+          # 尝试使用simg2img转换
+          if file system.img | grep -q "sparse"; then
+            echo "检测到稀疏镜像，正在转换..."
+            simg2img system.img system_raw.img
+            mv system_raw.img system.img
+            sudo mount -t ext4 -o ro,loop system.img system_mount || true
+          fi
+        }
         
         # 查找build.prop文件
-        if [ -f "system_mount/system/build.prop" ]; then
-          BUILD_PROPS="system_mount/system/build.prop"
-        elif [ -f "system_mount/build.prop" ]; then
-          BUILD_PROPS="system_mount/build.prop"
-        fi
+        BUILD_PROPS=""
+        paths=(
+          "system_mount/system/build.prop"
+          "system_mount/build.prop"
+          "system_mount/system/system/build.prop"
+          "system_mount/vendor/build.prop"
+        )
+        
+        for path in "${paths[@]}"; do
+          if [ -f "$path" ]; then
+            BUILD_PROPS="$path"
+            break
+          fi
+        done
         
         # 提取版本信息
         if [ -n "$BUILD_PROPS" ]; then
+          echo "找到build.prop: $BUILD_PROPS"
           ROM_VERSION=$(grep -m1 "ro.build.version.incremental" "$BUILD_PROPS" | cut -d'=' -f2)
           ANDROID_VERSION=$(grep -m1 "ro.build.version.release" "$BUILD_PROPS" | cut -d'=' -f2)
           SECURITY_PATCH=$(grep -m1 "ro.build.version.security_patch" "$BUILD_PROPS" | cut -d'=' -f2)
           echo "rom_version=$ROM_VERSION" >> $GITHUB_ENV
           echo "android_version=$ANDROID_VERSION" >> $GITHUB_ENV
           echo "security_patch=${SECURITY_PATCH:-未知}" >> $GITHUB_ENV
+        else
+          echo "::warning::未找到build.prop文件"
         fi
         
         # 清理挂载点
@@ -209,6 +290,11 @@ jobs:
         echo "⚙️ 配置构建选项..."
         cd $BUILD_DIR
         
+        # 跳过权限更改操作
+        sed -i 's/chown -R root:root/# chown -R root:root/g' make.sh
+        sed -i 's/chmod -R 777/# chmod -R 777/g' make.sh
+        echo "🛡️ 跳过权限修改操作"
+        
         # 配置super模式
         if [ "$make_super" = 'true' ]; then
           sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
@@ -219,7 +305,7 @@ jobs:
         BRANDS=("MIUI" "Flyme" "ColorOS" "H2OS" "SmartisanOS" "ZUI")
         KEYS=("make_miui" "make_flyme" "make_coloros" "make_h2os" "make_smartisanos" "make_zui")
         
-        for i in ${!BRANDS[@]}; do
+        for i in "${!BRANDS[@]}"; do
           key="${KEYS[$i]}"
           brand="${BRANDS[$i]}"
           
@@ -248,8 +334,16 @@ jobs:
       run: |
         echo "🏗️ 开始构建SGSI..."
         cd $BUILD_DIR
+        # 添加执行权限
+        find . -type f -name "*.sh" -exec chmod +x {} \;
+        
         time bash make.sh
-        [ ! -d "out" ] && { echo "::error::构建失败，未找到输出目录"; exit 1; }
+        if [ ! -d "out" ]; then
+          echo "::error::构建失败，未找到输出目录"
+          echo "构建日志:"
+          cat build.log || true
+          exit 1
+        fi
         echo "✅ SGSI构建完成"
         
     - name: 打包成果
@@ -263,10 +357,16 @@ jobs:
         echo "品牌: ${brand:-通用}" >> version-info.txt
         echo "Android版本: ${android_version:-未知}" >> version-info.txt
         echo "安全补丁: ${security_patch:-未知}" >> version-info.txt
+        echo "构建日期: $(date +"%Y-%m-%d %H:%M:%S %Z")" >> version-info.txt
         
         # 创建压缩包
         7za a -t7z -mx=9 "$OUTPUT_FILE" SGSI/* version-info.txt
-        [ ! -f "$OUTPUT_FILE" ] && { echo "::error::打包失败"; exit 1; }
+        if [ ! -f "$OUTPUT_FILE" ]; then
+          echo "::error::打包失败"
+          echo "SGSI目录内容:"
+          ls -lAh SGSI/
+          exit 1
+        fi
         
         OUTPUT_SIZE=$(du -sh "$OUTPUT_FILE" | awk '{print $1}')
         echo "✅ 打包完成 (大小: $OUTPUT_SIZE)"
@@ -278,7 +378,7 @@ jobs:
         cd $BUILD_DIR
         curl -sL https://git.io/file-transfer | sh
         ./transfer wet "$OUTPUT_FILE" | tee transfer.log
-        DOWNLOAD_URL=$(grep 'Download Link:' transfer.log | cut -d' ' -f3-)
+        DOWNLOAD_URL=$(grep -oP 'Download Link: \K.*' transfer.log)
         
         if [ -n "$DOWNLOAD_URL" ]; then
           echo "## SGSI下载" >> $GITHUB_STEP_SUMMARY
@@ -288,6 +388,7 @@ jobs:
           echo "✅ 上传成功"
         else
           echo "::error::WeTransfer上传失败"
+          cat transfer.log
         fi
         
     - name: 上传制品
