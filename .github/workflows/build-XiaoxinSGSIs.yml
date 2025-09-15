@@ -45,7 +45,7 @@ jobs:
           [make_zui]=required
           [make_super]=required
           [upload_artifact]=required
-          [uploa_wetransfer]=required
+          [upload_wetransfer]=required
         )
         
         # 解析配置
