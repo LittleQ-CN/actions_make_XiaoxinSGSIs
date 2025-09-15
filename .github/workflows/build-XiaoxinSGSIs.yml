@@ -36,6 +36,56 @@ jobs:
         sudo cp sdat2img-tool/sdat2img.py /usr/local/bin/
         sudo chmod +x /usr/local/bin/sdat2img.py
         
+    # 读取sgsi.json配置
+    - name: 读取sgsi配置
+      run: |
+        # 设置默认值
+        ROM_URL=""
+        ROM_NAME="Custom-ROM"
+        ANDROID_VERSION="13"
+        BUILD_TYPE="userdebug"
+        PACK_SGSI="true"
+        MAKE_MIUI="false"
+        MAKE_FLYME="false"
+        MAKE_COLOROS="false"
+        MAKE_H2OS="false"
+        MAKE_SMARTISANOS="false"
+        MAKE_ZUI="false"
+        MAKE_SUPER="false"
+        
+        # 如果配置文件存在则读取
+        if [ -f "sgsi.json" ]; then
+          echo "找到sgsi.json配置文件，读取配置..."
+          ROM_URL=$(jq -r '.rom_url' sgsi.json)
+          ROM_NAME=$(jq -r '.rom_name' sgsi.json)
+          ANDROID_VERSION=$(jq -r '.android_version' sgsi.json)
+          BUILD_TYPE=$(jq -r '.build_type' sgsi.json)
+          PACK_SGSI=$(jq -r '.pack_sgsi' sgsi.json)
+          MAKE_MIUI=$(jq -r '.make_miui' sgsi.json)
+          MAKE_FLYME=$(jq -r '.make_flyme' sgsi.json)
+          MAKE_COLOROS=$(jq -r '.make_coloros' sgsi.json)
+          MAKE_H2OS=$(jq -r '.make_h2os' sgsi.json)
+          MAKE_SMARTISANOS=$(jq -r '.make_smartisanos' sgsi.json)
+          MAKE_ZUI=$(jq -r '.make_zui' sgsi.json)
+          MAKE_SUPER=$(jq -r '.make_super' sgsi.json)
+        else
+          echo "::warning::未找到sgsi.json配置文件，使用默认值"
+        fi
+        
+        # 设置环境变量
+        echo "rom_url=$ROM_URL" >> $GITHUB_ENV
+        echo "rom_name=$ROM_NAME" >> $GITHUB_ENV
+        echo "android_version=$ANDROID_VERSION" >> $GITHUB_ENV
+        echo "build_type=$BUILD_TYPE" >> $GITHUB_ENV
+        echo "pack_sgsi=$PACK_SGSI" >> $GITHUB_ENV
+        echo "make_miui=$MAKE_MIUI" >> $GITHUB_ENV
+        echo "make_flyme=$MAKE_FLYME" >> $GITHUB_ENV
+        echo "make_coloros=$MAKE_COLOROS" >> $GITHUB_ENV
+        echo "make_h2os=$MAKE_H2OS" >> $GITHUB_ENV
+        echo "make_smartisanos=$MAKE_SMARTISANOS" >> $GITHUB_ENV
+        echo "make_zui=$MAKE_ZUI" >> $GITHUB_ENV
+        echo "make_super=$MAKE_SUPER" >> $GITHUB_ENV
+        
     - name: 下载工具箱
       run: |
         TOOL_FILE="${{ github.workspace }}/SGSI-build-tool.tar"
@@ -73,22 +123,8 @@ jobs:
         ./setup.sh
         cd ../../
         
-    - name: 读取配置和ROM信息
-      id: rom_info
+    - name: 设置构建时间
       run: |
-        CONFIG_FILE="config.json"
-        ROM_URL=""
-        ROM_NAME="Custom-ROM"
-        ANDROID_VERSION="13"
-        BUILD_TYPE="userdebug"
-        
-        if [ -f "$CONFIG_FILE" ]; then
-          ROM_URL=$(jq -r '.rom_url' "$CONFIG_FILE")
-          ROM_NAME=$(jq -r '.rom_name' "$CONFIG_FILE")
-          ANDROID_VERSION=$(jq -r '.android_version' "$CONFIG_FILE")
-          BUILD_TYPE=$(jq -r '.build_type' "$CONFIG_FILE")
-        fi
-        
         format_time() {
             local time_str=$(date +"%Y/%m/%d")
             local hour=$(date +"%H")
@@ -113,18 +149,14 @@ jobs:
         }
         
         BUILD_TIME_FORMATTED=$(format_time)
-        echo "SYSTEM_INFO=$ROM_NAME | Android $ANDROID_VERSION | $BUILD_TYPE" >> $GITHUB_ENV
         echo "BUILD_DATE=$BUILD_TIME_FORMATTED" >> $GITHUB_ENV
-        echo "ROM_NAME=$ROM_NAME" >> $GITHUB_ENV
-        echo "ANDROID_VERSION=$ANDROID_VERSION" >> $GITHUB_ENV
-        echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_ENV
-        echo "ROM_URL=$ROM_URL" >> $GITHUB_ENV
+        echo "SYSTEM_INFO=$rom_name | Android $android_version | $build_type" >> $GITHUB_ENV
         
     - name: 下载ROM文件
       run: |
         ROM_FILE="${{ env.ROM_DIR }}/source_rom.zip"
         mkdir -p "${{ env.ROM_DIR }}"
-        axel -n 8 -o "$ROM_FILE" "$ROM_URL" || curl -L -o "$ROM_FILE" "$ROM_URL"
+        axel -n 8 -o "$ROM_FILE" "$rom_url" || curl -L -o "$ROM_FILE" "$rom_url"
         if [ ! -f "$ROM_FILE" ]; then
           echo "::error::ROM下载失败"
           exit 1
@@ -135,6 +167,7 @@ jobs:
         cd "${{ env.ROM_DIR }}"
         unzip -q source_rom.zip
         
+        # 检测系统镜像格式
         if [ -f "system.img" ]; then
           SYSTEM_IMAGE="system.img"
         elif [ -f "system.new.dat.br" ]; then
@@ -150,14 +183,17 @@ jobs:
           exit 1
         fi
         
+        # 转换镜像格式
         if [[ "$SYSTEM_IMAGE" == *.dat ]]; then
           sdat2img.py system.transfer.list $SYSTEM_IMAGE system.img
           SYSTEM_IMAGE="system.img"
         fi
         
+        # 获取原始镜像大小
         ORIGINAL_SIZE=$(du -sh system.img | awk '{print $1}')
         echo "ORIGINAL_SIZE=$ORIGINAL_SIZE" >> $GITHUB_ENV
         
+        # 收集系统信息
         mkdir -p temp_mount
         sudo mount -o ro,loop system.img temp_mount 2>/dev/null || true
         
@@ -188,12 +224,13 @@ jobs:
         SYSTEM_IMG_SIZE=$(du -sh out/system.img | awk '{print $1}')
         echo "SYSTEM_IMG_SIZE=$SYSTEM_IMG_SIZE" >> $GITHUB_ENV
         
+        # 创建构建信息文件
         echo "Xiaoxin SGSI Build" > out/build-info.txt
         echo "构建日期: ${{ env.BUILD_DATE }}" >> out/build-info.txt
-        echo "原始ROM: ${{ env.ROM_NAME }} (${{ env.ROM_VERSION }})" >> out/build-info.txt
-        echo "Android版本: ${{ env.ANDROID_VERSION }} (${{ env.SECURITY_PATCH }})" >> out/build-info.txt
+        echo "原始ROM: ${{ env.rom_name }} (${{ env.ROM_VERSION }})" >> out/build-info.txt
+        echo "Android版本: ${{ env.android_version }} (${{ env.SECURITY_PATCH }})" >> out/build-info.txt
         echo "设备代号: ${{ env.DEVICE_NAME }}" >> out/build-info.txt
-        echo "构建类型: ${{ env.BUILD_TYPE }}" >> out/build-info.txt
+        echo "构建类型: ${{ env.build_type }}" >> out/build-info.txt
         echo "原始镜像大小: ${{ env.ORIGINAL_SIZE }}" >> out/build-info.txt
         echo "SGSI镜像大小: $SYSTEM_IMG_SIZE" >> out/build-info.txt
         
@@ -231,18 +268,19 @@ jobs:
         zip -q -9 "$COMPRESSED_FILE" system.sparse.img
         COMPRESSED_SIZE=$(du -sh "$COMPRESSED_FILE" | awk '{print $1}')
         
+        # 更新构建信息
         echo "稀疏镜像大小: $SPARSE_SIZE" >> build-info.txt
         echo "压缩包大小: $COMPRESSED_SIZE" >> build-info.txt
         echo "打包日期: $PACK_TIME" >> build-info.txt
         
         zip -q -9 "$COMPRESSED_FILE" build-info.txt
         
-        SYSTEM_INFO_STRING="设备: ${{ env.DEVICE_NAME }} | Android: ${{ env.ANDROID_VERSION }} | 大小: $COMPRESSED_SIZE | 打包日期: $PACK_TIME"
+        # 添加系统信息到zip注释
+        SYSTEM_INFO_STRING="设备: ${{ env.DEVICE_NAME }} | Android: ${{ env.android_version }} | 大小: $COMPRESSED_SIZE | 打包日期: $PACK_TIME"
         echo "$SYSTEM_INFO_STRING" | zipnote -w "$COMPRESSED_FILE"
         
     - name: 发布构建产物
       if: success()
-      # 修复：使用最新的v4版本的upload-artifact
       uses: actions/upload-artifact@v4
       with:
         name: SGSI-Build-Output
