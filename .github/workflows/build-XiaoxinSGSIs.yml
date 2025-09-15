@@ -17,21 +17,17 @@ jobs:
     timeout-minutes: 240
     
     steps:
-    # 步骤1: 设置时区
     - name: 设置时区
       run: sudo timedatectl set-timezone Asia/Shanghai
         
-    # 步骤2: 检出代码库
     - name: 检出代码库
       uses: actions/checkout@v4
     
-    # 步骤3: 清理工作区
     - name: 清理工作区
       run: |
         rm -rf SGSI-build-tool out || true
         df -h
         
-    # 步骤4: 安装必要工具
     - name: 安装必要工具
       run: |
         sudo apt-get update -qq
@@ -40,7 +36,6 @@ jobs:
         sudo cp sdat2img-tool/sdat2img.py /usr/local/bin/
         sudo chmod +x /usr/local/bin/sdat2img.py
         
-    # 步骤5: 下载工具箱
     - name: 下载工具箱
       run: |
         TOOL_FILE="${{ github.workspace }}/SGSI-build-tool.tar"
@@ -58,7 +53,6 @@ jobs:
           exit 1
         fi
         
-    # 步骤6: 安全初始化环境
     - name: 安全初始化环境
       run: |
         tar -xvf "${{ github.workspace }}/SGSI-build-tool.tar"
@@ -67,7 +61,6 @@ jobs:
           exit 1
         fi
         
-        # 创建修复后的setup.sh脚本
         echo '#!/bin/bash' > SGSI-build-tool/10/setup.sh
         echo 'mkdir -p tmp out/system' >> SGSI-build-tool/10/setup.sh
         echo 'find . -type f -name "*.sh" -exec chmod +x {} \;' >> SGSI-build-tool/10/setup.sh
@@ -80,7 +73,6 @@ jobs:
         ./setup.sh
         cd ../../
         
-    # 步骤7: 读取配置和ROM信息
     - name: 读取配置和ROM信息
       id: rom_info
       run: |
@@ -97,7 +89,6 @@ jobs:
           BUILD_TYPE=$(jq -r '.build_type' "$CONFIG_FILE")
         fi
         
-        # 时间格式化函数
         format_time() {
             local time_str=$(date +"%Y/%m/%d")
             local hour=$(date +"%H")
@@ -129,7 +120,6 @@ jobs:
         echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_ENV
         echo "ROM_URL=$ROM_URL" >> $GITHUB_ENV
         
-    # 步骤8: 下载ROM文件
     - name: 下载ROM文件
       run: |
         ROM_FILE="${{ env.ROM_DIR }}/source_rom.zip"
@@ -140,13 +130,11 @@ jobs:
           exit 1
         fi
         
-    # 步骤9: 解压ROM文件并收集系统信息
     - name: 解压ROM文件并收集系统信息
       run: |
         cd "${{ env.ROM_DIR }}"
         unzip -q source_rom.zip
         
-        # 检测系统镜像格式
         if [ -f "system.img" ]; then
           SYSTEM_IMAGE="system.img"
         elif [ -f "system.new.dat.br" ]; then
@@ -162,17 +150,14 @@ jobs:
           exit 1
         fi
         
-        # 转换镜像格式
         if [[ "$SYSTEM_IMAGE" == *.dat ]]; then
           sdat2img.py system.transfer.list $SYSTEM_IMAGE system.img
           SYSTEM_IMAGE="system.img"
         fi
         
-        # 获取原始镜像大小
         ORIGINAL_SIZE=$(du -sh system.img | awk '{print $1}')
         echo "ORIGINAL_SIZE=$ORIGINAL_SIZE" >> $GITHUB_ENV
         
-        # 收集系统信息
         mkdir -p temp_mount
         sudo mount -o ro,loop system.img temp_mount 2>/dev/null || true
         
@@ -190,7 +175,6 @@ jobs:
         sudo umount temp_mount 2>/dev/null || true
         rm -rf temp_mount
         
-    # 步骤10: 构建SGSI系统镜像
     - name: 构建SGSI系统镜像
       run: |
         cd "${{ env.BUILD_DIR }}"
@@ -204,7 +188,6 @@ jobs:
         SYSTEM_IMG_SIZE=$(du -sh out/system.img | awk '{print $1}')
         echo "SYSTEM_IMG_SIZE=$SYSTEM_IMG_SIZE" >> $GITHUB_ENV
         
-        # 创建构建信息文件
         echo "Xiaoxin SGSI Build" > out/build-info.txt
         echo "构建日期: ${{ env.BUILD_DATE }}" >> out/build-info.txt
         echo "原始ROM: ${{ env.ROM_NAME }} (${{ env.ROM_VERSION }})" >> out/build-info.txt
@@ -214,14 +197,12 @@ jobs:
         echo "原始镜像大小: ${{ env.ORIGINAL_SIZE }}" >> out/build-info.txt
         echo "SGSI镜像大小: $SYSTEM_IMG_SIZE" >> out/build-info.txt
         
-    # 步骤11: 压缩并添加系统信息
     - name: 压缩并添加系统信息
       run: |
         cd "${{ env.BUILD_DIR }}/out"
         img2simg system.img system.sparse.img
         SPARSE_SIZE=$(du -sh system.sparse.img | awk '{print $1}')
         
-        # 时间格式化函数
         format_time() {
             local time_str=$(date +"%Y/%m/%d")
             local hour=$(date +"%H")
@@ -250,21 +231,19 @@ jobs:
         zip -q -9 "$COMPRESSED_FILE" system.sparse.img
         COMPRESSED_SIZE=$(du -sh "$COMPRESSED_FILE" | awk '{print $1}')
         
-        # 更新构建信息
         echo "稀疏镜像大小: $SPARSE_SIZE" >> build-info.txt
         echo "压缩包大小: $COMPRESSED_SIZE" >> build-info.txt
         echo "打包日期: $PACK_TIME" >> build-info.txt
         
         zip -q -9 "$COMPRESSED_FILE" build-info.txt
         
-        # 添加系统信息到zip注释
         SYSTEM_INFO_STRING="设备: ${{ env.DEVICE_NAME }} | Android: ${{ env.ANDROID_VERSION }} | 大小: $COMPRESSED_SIZE | 打包日期: $PACK_TIME"
         echo "$SYSTEM_INFO_STRING" | zipnote -w "$COMPRESSED_FILE"
         
-    # 步骤12: 发布构建产物
     - name: 发布构建产物
       if: success()
-      uses: actions/upload-artifact@v3
+      # 修复：使用最新的v4版本的upload-artifact
+      uses: actions/upload-artifact@v4
       with:
         name: SGSI-Build-Output
         path: ${{ env.BUILD_DIR }}/out/SGSI-*.zip
