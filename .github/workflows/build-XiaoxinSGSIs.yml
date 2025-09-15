@@ -72,13 +72,12 @@ jobs:
         echo "pv版本: $(pv --version | head -1)"
         echo "jq版本: $(jq --version)"
         
-    # ========== 双重下载策略开始 ==========
     - name: 尝试使用 release-downloader 下载工具箱
       id: download_release
       continue-on-error: true
       uses: robinraju/release-downloader@v1
       with:
-        仓库: "xiaoxindada/SGSI-build-tool"
+        repository: "xiaoxindada/SGSI-build-tool"
         tag: "v1.9"
         fileName: "SGSI-build-tool.tar"
         out-file-path: "${{ github.workspace }}/SGSI-build-tool-release.tar"
@@ -137,7 +136,6 @@ jobs:
         
         echo "✅ 工具包验证通过"
         echo "::endgroup::"
-    # ========== 双重下载策略结束 ==========
     
     - name: 初始化环境
       run: |
@@ -157,6 +155,12 @@ jobs:
         
         echo "执行环境初始化..."
         cd SGSI-build-tool/10
+        
+        # 预先修复权限问题
+        echo "修复权限问题..."
+        sudo chmod -R a+w bin || true
+        sudo chmod -R a+w make || true
+        
         chmod +x setup.sh
         sudo bash setup.sh || {
           echo "::error::环境初始化失败"
@@ -168,8 +172,13 @@ jobs:
         find SGSI-build-tool -type f -exec grep -lZ 'chown\|sudo' {} + | xargs -0 sed -i '/chown\|sudo/d'
         
         echo "设置脚本权限..."
+        # 只给 .sh 文件添加执行权限
         find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
-        chmod +x $BUILD_DIR/bin/*
+        
+        # 单独处理 bin 目录，避免修改 .py 文件权限
+        if [ -d "$BUILD_DIR/bin" ]; then
+          find "$BUILD_DIR/bin" -type f \( -name "*" ! -name "*.py" \) -exec chmod +x {} \;
+        fi
         
         echo "✅ 初始化完成"
         echo "::endgroup::"
@@ -239,7 +248,6 @@ jobs:
             echo "✅ [$filename] curl下载完成"
           else
             echo "❌ [$filename] curl下载失败"
-            echo "::error::[$filename] curl下载失败"
           fi
         fi
         
@@ -251,7 +259,6 @@ jobs:
             echo "✅ [$filename] wget下载完成"
           else
             echo "❌ [$filename] wget下载失败"
-            echo "::error::[$filename] wget下载失败"
           fi
         fi
         
@@ -269,6 +276,72 @@ jobs:
         fi
         
         echo "✅ [$filename] 下载成功! 大小: $(numfmt --to=iec $downloaded_size)"
+    
+    - name: 提取移植机型信息
+      id: extract_device
+      run: |
+        echo "::group::提取设备信息"
+        rom_path="$ROM_DIR/${{ steps.config.outputs.rom_name }}"
+        extract_dir="extracted_rom"
+        
+        # 创建临时解压目录
+        mkdir -p "$extract_dir"
+        
+        # 尝试解压 ROM
+        if [[ $rom_path == *.zip ]]; then
+          echo "解压ZIP格式ROM..."
+          unzip -q "$rom_path" -d "$extract_dir"
+        elif [[ $rom_path == *.ozip ]]; then
+          echo "解密OZIP格式ROM..."
+          python3 $BUILD_DIR/oppo_ozip/ozipdecrypt.py "$rom_path"
+          decrypted_rom="${rom_path%.*}.zip"
+          if [ -f "$decrypted_rom" ]; then
+            unzip -q "$decrypted_rom" -d "$extract_dir"
+          else
+            echo "::error::解密后未找到ROM文件"
+            exit 1
+          fi
+        else
+          echo "::error::不支持的ROM格式: $rom_path"
+          exit 1
+        fi
+        
+        # 查找 build.prop 文件
+        build_prop=$(find "$extract_dir" -name "build.prop" 2>/dev/null | head -1)
+        
+        if [ -z "$build_prop" ]; then
+          echo "::warning::未找到build.prop文件"
+          device_model="未知机型"
+          device_code="未知代号"
+        else
+          echo "找到build.prop: $build_prop"
+          
+          # 提取设备型号
+          device_model=$(grep -i 'ro.product.model=' "$build_prop" | cut -d'=' -f2 | tr -d '[:space:]' | head -1)
+          [ -z "$device_model" ] && device_model="未知机型"
+          
+          # 提取设备代号
+          device_code=$(grep -i 'ro.product.device=' "$build_prop" | cut -d'=' -f2 | tr -d '[:space:]' | head -1)
+          [ -z "$device_code" ] && device_code="未知代号"
+          
+          # 提取设备品牌
+          device_brand=$(grep -i 'ro.product.brand=' "$build_prop" | cut -d'=' -f2 | tr -d '[:space:]' | head -1)
+          [ -z "$device_brand" ] && device_brand=""
+        fi
+        
+        # 组合显示信息
+        device_info="$device_model ($device_code)"
+        [ -n "$device_brand" ] && device_info="$device_brand $device_info"
+        
+        echo "设备信息: $device_info"
+        echo "DEVICE_INFO=$device_info" >> $GITHUB_ENV
+        
+        # 清理临时文件
+        rm -rf "$extract_dir"
+        if [[ $rom_path == *.ozip ]]; then
+          rm -f "${rom_path%.*}.zip" 2>/dev/null || true
+        fi
+        echo "::endgroup::"
     
     - name: 启用Super分区支持
       if: ${{ steps.config.outputs.make_super == 'true' }}
@@ -343,18 +416,27 @@ jobs:
     - name: 构建SGSI系统镜像
       timeout-minutes: 120
       run: |
-        rm -f $BUILD_DIR/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
-        cp make/* $BUILD_DIR/
-        cp bin/* $BUILD_DIR/bin/
+        # ===== 环境准备 =====
+        echo "::group::初始化构建环境"
+        rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
+        cp make/* SGSI-build-tool/10/
+        cp bin/* SGSI-build-tool/10/bin/
         
-        find $BUILD_DIR -type f -exec grep -lZ 'chown' {} + | xargs -0 sed -i '/chown/d'
-        find $BUILD_DIR -name "*.sh" -exec chmod +x {} \;
-        chmod +x $BUILD_DIR/bin/*
+        # 修复权限问题
+        find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
+        chmod +x SGSI-build-tool/10/bin/*
+        echo "✅ 脚本权限修复完成"
+        echo "::endgroup::"
         
-        cd $BUILD_DIR
+        # ===== 构建阶段 =====
+        echo "::group::执行构建过程"
+        cd SGSI-build-tool/10
+        
+        # 创建必要的目录结构
         mkdir -p out/{system,config}
         mkdir -p out/system/{bin,etc,lib,usr,framework,app,priv-app,vendor}
         
+        # 创建默认文件系统配置
         echo '# 默认文件上下文' > out/config/system_file_contexts
         echo '/system(/.*)? u:object_r:system_file:s0' >> out/config/system_file_contexts
         echo '/vendor(/.*)? u:object_r:vendor_file:s0' >> out/config/system_file_contexts
@@ -363,48 +445,93 @@ jobs:
         echo '/system 0 0 755' >> out/config/system_fs_config
         echo '/vendor 0 0 755' >> out/config/system_fs_config
         
-        echo "::group::构建日志"
+        # 执行构建脚本
         start_time=$(date +%s)
-        if ! ./make.sh > build.log 2>&1; then
-          echo "::error::构建过程失败"
-          echo "最后50行日志:"
-          tail -n 50 build.log
-          exit 1
+        echo "开始构建SGSI镜像..."
+        
+        # 实时捕获构建日志
+        if ! ./make.sh | tee build.log; then
+            echo "::error::构建过程失败"
+            echo "最后50行日志:"
+            tail -n 50 build.log
+            exit 1
         fi
-        build_output=$(cat build.log)
-        echo "$build_output"
+        
         end_time=$(date +%s)
-        echo "构建耗时: $((end_time - start_time))秒"
+        build_duration=$((end_time - start_time))
+        echo "✅ 构建成功! 耗时: ${build_duration}秒"
         echo "::endgroup::"
         
-        if [ ! -f "out/system.img" ]; then
-          echo "::warning::system.img未生成，尝试手动创建"
-          if [ ! -d "out/system" ]; then
-            echo "::error::out/system目录不存在"
-            exit 1
-          fi
-          
-          system_size=$(du -sk out/system | cut -f1)
-          img_size_kb=$((system_size * 135 / 100))
-          img_size_mb=$(( (img_size_kb + 1023) / 1024 ))
-          [ $img_size_mb -lt 1024 ] && img_size_mb=1024
-          
-          echo "创建 ${img_size_mb}MB 系统镜像 (原始大小: ${system_size}KB)"
-          
-          ./bin/make_ext4fs -T 1230768000 -S out/config/system_file_contexts \
-            -C out/config/system_fs_config -l ${img_size_mb}M -a system out/system.img out/system/
+        # ===== 镜像验证 =====
+        echo "::group::验证构建结果"
+        if [ -f "out/system.img" ]; then
+            img_size=$(du -sh out/system.img | cut -f1)
+            echo "✅ system.img 已生成! 大小: $img_size"
+        else
+            echo "⚠️ system.img未生成，尝试手动创建"
             
-          if [ ! -f "out/system.img" ]; then
-            echo "::error::手动创建system.img失败"
-            exit 1
-          fi
+            if [ ! -d "out/system" ]; then
+                echo "::error::out/system目录不存在，无法手动创建镜像"
+                exit 1
+            fi
+            
+            # 计算镜像大小（原始大小+35%余量）
+            system_size_kb=$(du -sk out/system | cut -f1)
+            img_size_kb=$((system_size_kb * 135 / 100))
+            img_size_mb=$(( (img_size_kb + 1023) / 1024 ))
+            
+            # 确保最小分区大小为1GB
+            [ $img_size_mb -lt 1024 ] && img_size_mb=1024
+            
+            echo "创建 ${img_size_mb}MB 系统镜像 (原始大小: ${system_size_kb}KB)"
+            
+            # 优先使用标准工具创建镜像
+            if [ -f "bin/make_ext4fs" ]; then
+                ./bin/make_ext4fs -T 1230768000 -S out/config/system_file_contexts \
+                    -C out/config/system_fs_config -l ${img_size_mb}M -a system out/system.img out/system/
+            else
+                echo "::warning::使用备用镜像创建方案"
+                ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 out/system.img ${img_size_mb}M
+                ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config \
+                    -S out/config/system_file_contexts -f out/system/ -a /system out/system.img
+            fi
+            
+            if [ ! -f "out/system.img" ]; then
+                echo "::error::手动创建system.img失败"
+                exit 1
+            fi
+            
+            img_size=$(du -sh out/system.img | cut -f1)
+            echo "✅ 手动创建成功! 大小: $img_size"
+        fi
+        echo "::endgroup::"
+        
+        # ===== 处理特殊格式 =====
+        echo "::group::处理特殊格式"
+        # 检查Android版本并处理特殊格式
+        if grep -q "Android Nougat 7.x / Oreo 8.x detected" build.log; then
+            echo "::notice::检测到Android 7.x/8.x ROM（ext4格式）"
         fi
         
-        img_size=$(du -sh out/system.img | cut -f1)
-        echo "生成的system.img大小: $img_size"
-        mv out/system.img SGSI/
-        cd ../../../
+        # 验证sdat2img转换结果
+        if grep -q "sdat2img: failed" build.log; then
+            echo "::error::sdat2img转换失败"
+            exit 1
+        fi
+        echo "::endgroup::"
         
+        # ===== 打包结果 =====
+        echo "::group::整理构建产物"
+        mkdir -p SGSI
+        mv out/system.img SGSI/
+        
+        # 清理临时文件
+        rm -rf out/system build.log
+        
+        cd ../../
+        echo "✅ 构建产物已移动到SGSI目录"
+        echo "::endgroup::"
+    
     - name: 压缩系统镜像
       id: compress
       run: |
@@ -468,20 +595,60 @@ jobs:
       run: |
         rom_name="${{ steps.config.outputs.rom_name }}"
         
-        version=$(echo "$rom_name" | grep -oE '[Vv][0-9][0-9a-zA-Z.]*' | head -1 | sed 's/[Vv]//' || echo "unknown")
+        # 清理 ROM 名称
+        clean_rom_name=$(echo "$rom_name" | tr -cd '[:alnum:]_.-' | sed 's/\.\.*/./g')
         
-        base_name="${rom_name%.*}"
-        release_name="${base_name} SGSI"
-        release_tag="Android10-${base_name}-${{ github.run_number }}"
+        # 提取版本号
+        version=$(echo "$clean_rom_name" | grep -oE '[Vv][0-9][0-9a-zA-Z.]*' | head -1 | sed 's/[Vv]//' || echo "unknown")
         
+        # 生成中文可读时间戳 (格式: 月日+时间段+时+分)
+        hour=$(date +"%H")
+        min=$(date +"%M")
+        day=$(date +"%d")
+        month=$(date +"%m")
+        
+        # 确定时间段描述
+        if [ $hour -ge 0 ] && [ $hour -lt 5 ]; then
+          period="凌晨"
+        elif [ $hour -ge 5 ] && [ $hour -lt 8 ]; then
+          period="清晨"
+        elif [ $hour -ge 8 ] && [ $hour -lt 11 ]; then
+          period="上午"
+        elif [ $hour -ge 11 ] && [ $hour -lt 13 ]; then
+          period="中午"
+        elif [ $hour -ge 13 ] && [ $hour -lt 18 ]; then
+          period="下午"
+        else
+          period="晚上"
+        fi
+        
+        # 转换为12小时制
+        hour12=$((hour % 12))
+        [ $hour12 -eq 0 ] && hour12=12
+        
+        # 组合时间字符串
+        timestamp="${month}月${day}日${period}$(printf "%d" $hour12)时${min}分"
+        
+        # 构建唯一标签
+        release_tag="SGSI-${clean_rom_name}-${{ github.run_number }}"
+        
+        # 移除标签中的特殊字符
+        safe_release_tag=$(echo "$release_tag" | tr -cd '[:alnum:]_-' | cut -c 1-50)
+        
+        # 设置发布名称
+        release_name="${clean_rom_name} SGSI"
+        
+        # 输出环境变量
         echo "RELEASE_NAME=$release_name" >> $GITHUB_ENV
-        echo "RELEASE_TAG=$release_tag" >> $GITHUB_ENV
+        echo "RELEASE_TAG=$safe_release_tag" >> $GITHUB_ENV
         echo "ROM_VERSION=$version" >> $GITHUB_ENV
+        echo "BUILD_TIME=$timestamp" >> $GITHUB_ENV
         
         echo "设置发布信息:"
         echo "名称: $release_name"
-        echo "标签: $release_tag"
+        echo "标签: $safe_release_tag"
         echo "版本: $version"
+        echo "构建时间: $timestamp"
         
     - name: 创建最终包
       id: create_pack
@@ -561,7 +728,8 @@ jobs:
         prerelease: false
         body: |
           SGSI构建成功!
-          构建号: ${{ github.run_number }}
+          构建时间: ${{ env.BUILD_TIME }}
+          移植原机型: ${{ env.DEVICE_INFO }}
           原始ROM: ${{ steps.config.outputs.rom_name }}
           ROM版本: ${{ env.ROM_VERSION }}
           系统镜像大小:
