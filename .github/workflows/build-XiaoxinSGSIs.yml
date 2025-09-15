@@ -69,49 +69,108 @@ jobs:
       run: |
         echo "安装下载工具..."
         sudo apt-get update -qq
-        sudo apt-get install -y -qq axel pv jq bc
+        sudo apt-get install -y -qq axel pv jq bc file
         echo "axel版本: $(axel --version | head -1)"
         echo "pv版本: $(pv --version | head -1)"
         echo "jq版本: $(jq --version)"
+        echo "file版本: $(file --version | head -1)"
         
     - name: 下载构建工具
       run: |
-        if command -v curl &> /dev/null; then
-          curl -L -k --retry 3 --retry-delay 5 -sS -o SGSI-build-tool.tar "$BUILD_TOOL_URL" || curl_fail=$?
-        else
-          wget -q -c --tries=3 "$BUILD_TOOL_URL" || wget_fail=$?
+        tool_url="$BUILD_TOOL_URL"
+        echo "下载构建工具: $tool_url"
+        
+        # 三重下载机制
+        download_success=false
+        
+        # 第一优先级: axel (多线程)
+        if command -v axel &> /dev/null; then
+          echo "使用axel下载 (8线程)..."
+          if axel -n 8 -U "Mozilla/5.0" -q -o SGSI-build-tool.tar "$tool_url"; then
+            echo "axel下载成功"
+            download_success=true
+          else
+            echo "axel下载失败"
+            axel_fail=$?
+          fi
         fi
         
-        if [ ! -f "SGSI-build-tool.tar" ]; then
-          echo "::error::工具包下载失败"
-          echo "curl状态: ${curl_fail:-未使用}, wget状态: ${wget_fail:-未使用}"
+        # 第二优先级: curl (带重试)
+        if [ "$download_success" = false ] && command -v curl &> /dev/null; then
+          echo "尝试curl下载 (3次重试)..."
+          if curl -L -k --retry 3 --retry-delay 5 -sS -o SGSI-build-tool.tar "$tool_url"; then
+            echo "curl下载成功"
+            download_success=true
+          else
+            echo "curl下载失败"
+            curl_fail=$?
+          fi
+        fi
+        
+        # 第三优先级: wget
+        if [ "$download_success" = false ] && command -v wget &> /dev/null; then
+          echo "尝试wget下载..."
+          if wget -q -c -U "Mozilla/5.0" -O SGSI-build-tool.tar "$tool_url"; then
+            echo "wget下载成功"
+            download_success=true
+          else
+            echo "wget下载失败"
+            wget_fail=$?
+          fi
+        fi
+        
+        # 检查下载结果
+        if [ "$download_success" = false ] || [ ! -f "SGSI-build-tool.tar" ]; then
+          echo "::error::所有下载方法均失败"
+          echo "axel状态: ${axel_fail:-未使用}, curl状态: ${curl_fail:-未使用}, wget状态: ${wget_fail:-未使用}"
           exit 1
         fi
         
+        # 文件验证
         echo "工具包大小: $(du -sh SGSI-build-tool.tar | cut -f1)"
+        file_type=$(file -b SGSI-build-tool.tar)
+        echo "文件类型: $file_type"
         
+        # 验证是否为tar文件
+        if ! tar -tf SGSI-build-tool.tar >/dev/null 2>&1; then
+          echo "::error::文件不是有效的tar归档"
+          echo "文件开头内容:"
+          head -c 200 SGSI-build-tool.tar | strings
+          exit 1
+        fi
+        
+        echo "工具包验证通过"
+    
     - name: 设置构建环境
       run: |
-        if ! tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir; then
+        echo "开始解压工具包..."
+        if ! tar -xvf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir; then
           echo "::error::解压构建工具失败"
+          echo "详细错误日志:"
+          tar -xvf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir 2>&1 | head -n 20
           exit 1
         fi
         
         if [ ! -d "SGSI-build-tool" ]; then
           echo "::error::解压后未找到SGSI-build-tool目录"
+          echo "解压内容列表:"
+          tar -tf SGSI-build-tool.tar | head -n 20
           ls -la
           exit 1
         fi
         
+        # 移除权限问题代码
         find SGSI-build-tool -type f -exec grep -lZ 'chown\|sudo' {} + | xargs -0 sed -i '/chown\|sudo/d'
-        find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
-        chmod +x $BUILD_DIR/bin/*
+        
+        # 设置执行权限
+        find SGSI-build-tool -name "*.sh" -exec chmod +x {} \;
+        chmod +x "$BUILD_DIR"/bin/*
         
         echo "构建环境准备完成"
     
     - name: 下载ROM文件
       run: |
-        mkdir -p $ROM_DIR
+        mkdir -p "$ROM_DIR"
         rom_path="$ROM_DIR/${{ steps.config.outputs.rom_name }}"
         filename="${{ steps.config.outputs.rom_name }}"
         
@@ -200,7 +259,7 @@ jobs:
     - name: 启用Super分区支持
       if: ${{ steps.config.outputs.make_super == 'true' }}
       run: |
-        sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' $BUILD_DIR/make.sh
+        sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' "$BUILD_DIR"/make.sh
         echo "已启用Super分区支持"
     
     - name: 配置系统构建脚本
@@ -228,13 +287,13 @@ jobs:
             exit 1
           fi
           
-          rm -f $BUILD_DIR/fixbug/fixbug.sh
-          cp "fix/$fix_script" $BUILD_DIR/fixbug/fixbug.sh
-          chmod +x $BUILD_DIR/fixbug/fixbug.sh
+          rm -f "$BUILD_DIR"/fixbug/fixbug.sh
+          cp "fix/$fix_script" "$BUILD_DIR"/fixbug/fixbug.sh
+          chmod +x "$BUILD_DIR"/fixbug/fixbug.sh
           
           if [ "$fix_script" = "ColorOS.sh" ]; then
             echo "解密ColorOS ozip文件..."
-            if ! python3 $BUILD_DIR/oppo_ozip/ozipdecrypt.py "$ROM_DIR/${{ steps.config.outputs.rom_name }}"; then
+            if ! python3 "$BUILD_DIR"/oppo_ozip/ozipdecrypt.py "$ROM_DIR/${{ steps.config.outputs.rom_name }}"; then
               echo "::error::ColorOS ozip解密失败"
               exit 1
             fi
@@ -247,15 +306,15 @@ jobs:
     - name: 构建SGSI系统镜像
       timeout-minutes: 120
       run: |
-        rm -f $BUILD_DIR/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
-        cp make/* $BUILD_DIR/
-        cp bin/* $BUILD_DIR/bin/
+        rm -f "$BUILD_DIR"/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
+        cp make/* "$BUILD_DIR"/
+        cp bin/* "$BUILD_DIR"/bin/
         
-        find $BUILD_DIR -type f -exec grep -lZ 'chown' {} + | xargs -0 sed -i '/chown/d'
-        find $BUILD_DIR -name "*.sh" -exec chmod +x {} \;
-        chmod +x $BUILD_DIR/bin/*
+        find "$BUILD_DIR" -type f -exec grep -lZ 'chown' {} + | xargs -0 sed -i '/chown/d'
+        find "$BUILD_DIR" -name "*.sh" -exec chmod +x {} \;
+        chmod +x "$BUILD_DIR"/bin/*
         
-        cd $BUILD_DIR
+        cd "$BUILD_DIR"
         mkdir -p out/{system,config}
         mkdir -p out/system/{bin,etc,lib,usr,framework,app,priv-app,vendor}
         
@@ -353,7 +412,7 @@ jobs:
     - name: 打包系统补丁
       run: |
         echo "打包系统补丁..."
-        mkdir -p $BUILD_DIR/SGSI
+        mkdir -p "$BUILD_DIR"/SGSI
         for i in {1..3}; do
           patch_dir="Patch/Patch$i"
           if [ -d "$patch_dir" ] && [ -n "$(ls -A "$patch_dir")" ]; then
@@ -363,7 +422,7 @@ jobs:
               echo "::warning::补丁$i打包失败"
               continue
             fi
-            mv "$zip_file" $BUILD_DIR/SGSI/
+            mv "$zip_file" "$BUILD_DIR"/SGSI/
           fi
         done
 
