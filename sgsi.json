@@ -9,6 +9,6 @@
   "make_smartisanos": false,
   "make_zui": false,
   "make_super": false,
-  "upload_artifact": false,
+  "upload_artifact": true,
   "upload_wetransfer": true
 }
