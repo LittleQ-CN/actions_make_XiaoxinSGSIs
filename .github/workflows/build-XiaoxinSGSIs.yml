@@ -72,49 +72,106 @@ jobs:
         echo "pv版本: $(pv --version | head -1)"
         echo "jq版本: $(jq --version)"
         
-    - name: 下载 XiaoxinSGSIs 工具箱
+    # ========== 双重下载策略开始 ==========
+    - name: 尝试使用 release-downloader 下载工具箱
+      id: download_release
+      continue-on-error: true
       uses: robinraju/release-downloader@v1
       with:
-        repository: "xiaoxindada/SGSI-build-tool"
+        仓库: "xiaoxindada/SGSI-build-tool"
         tag: "v1.9"
         fileName: "SGSI-build-tool.tar"
-        out-file-path: "SGSI-build-tool.tar"
-        
-    - name: 初始化环境
+        out-file-path: "${{ github.workspace }}/SGSI-build-tool-release.tar"
+      
+    - name: 验证 release-downloader 下载
+      id: verify_release
+      if: steps.download_release.outcome == 'success'
       run: |
-        echo "::group::初始化构建环境"
-        if [ ! -f "SGSI-build-tool.tar" ]; then
-          echo "::error::未找到工具包 SGSI-build-tool.tar"
+        echo "::group::验证 release-downloader 下载"
+        if [ ! -f "${{ github.workspace }}/SGSI-build-tool-release.tar" ]; then
+          echo "::error::release-downloader 下载后文件不存在"
+          echo "success=false" >> $GITHUB_OUTPUT
+        elif ! tar -tf "${{ github.workspace }}/SGSI-build-tool-release.tar" &> /dev/null; then
+          echo "::error::release-downloader 下载的文件损坏"
+          echo "success=false" >> $GITHUB_OUTPUT
+        else
+          echo "✅ release-downloader 下载验证成功"
+          mv "${{ github.workspace }}/SGSI-build-tool-release.tar" "${{ github.workspace }}/SGSI-build-tool.tar"
+          echo "success=true" >> $GITHUB_OUTPUT
+        fi
+        echo "::endgroup::"
+      
+    - name: 备选下载方案 (使用curl)
+      if: steps.download_release.outcome != 'success' || steps.verify_release.outputs.success != 'true'
+      run: |
+        echo "::group::使用备选curl方案下载工具箱"
+        echo "下载URL: https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
+        curl -L -o "${{ github.workspace }}/SGSI-build-tool.tar" \
+          "https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
+        
+        if [ ! -f "${{ github.workspace }}/SGSI-build-tool.tar" ]; then
+          echo "::error::备选下载方案失败"
           exit 1
         fi
         
+        file_size=$(du -sh "${{ github.workspace }}/SGSI-build-tool.tar" | cut -f1)
+        echo "✅ 备选下载成功! 大小: $file_size"
+        echo "::endgroup::"
+    
+    - name: 最终验证工具包
+      run: |
+        echo "::group::最终验证工具包"
+        if [ ! -f "${{ github.workspace }}/SGSI-build-tool.tar" ]; then
+          echo "::error::最终验证：未找到工具包"
+          exit 1
+        fi
+        
+        echo "检查文件类型..."
+        file_type=$(file "${{ github.workspace }}/SGSI-build-tool.tar")
+        echo "文件类型: $file_type"
+        
+        if ! tar -tf "${{ github.workspace }}/SGSI-build-tool.tar" &> /dev/null; then
+          echo "::error::文件损坏或格式不正确"
+          exit 1
+        fi
+        
+        echo "✅ 工具包验证通过"
+        echo "::endgroup::"
+    # ========== 双重下载策略结束 ==========
+    
+    - name: 初始化环境
+      run: |
+        echo "::group::初始化构建环境"
         echo "解压构建工具..."
-        sudo tar -xf SGSI-build-tool.tar
+        tar -xvf "${{ github.workspace }}/SGSI-build-tool.tar"
         
         if [ ! -d "SGSI-build-tool" ]; then
           echo "::error::解压后未找到SGSI-build-tool目录"
+          echo "解压后的内容:"
           ls -la
           exit 1
         fi
         
         echo "更新setup.sh..."
-        sudo rm -rf SGSI-build-tool/10/setup.sh
-        sudo cp bin/setup.sh SGSI-build-tool/10/
+        cp bin/setup.sh SGSI-build-tool/10/
         
         echo "执行环境初始化..."
         cd SGSI-build-tool/10
-        sudo chmod +x setup.sh
-        sudo bash setup.sh
+        chmod +x setup.sh
+        sudo bash setup.sh || {
+          echo "::error::环境初始化失败"
+          exit 1
+        }
         cd ../../
         
         echo "清理危险命令..."
-        find SGSI-build-tool -type f -exec grep -lZ 'chown\|sudo' {} + | xargs -0 sudo sed -i '/chown\|sudo/d'
+        find SGSI-build-tool -type f -exec grep -lZ 'chown\|sudo' {} + | xargs -0 sed -i '/chown\|sudo/d'
         
         echo "设置脚本权限..."
-        find SGSI-build-tool -type f -name "*.sh" -exec -name "*.sh" -exec sudo chmod +x {} \;
-        sudo chmod +x $BUILD_DIR/bin/*
+        find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
+        chmod +x $BUILD_DIR/bin/*
         
-        echo "初始化完成"
+        echo "✅ 初始化完成"
         echo "::endgroup::"
     
     - name: 下载ROM文件
@@ -219,7 +276,6 @@ jobs:
         sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' $BUILD_DIR/make.sh
         echo "已启用Super分区支持"
     
-    # 应用系统专属配置（优化合并版）
     - name: 应用系统专属配置
       run: |
         echo "::group::应用系统专属配置"
@@ -463,12 +519,14 @@ jobs:
         mkdir -p upload
         
         file_size_bytes=$(stat -c%s "$pack_name")
+        # 分割阈值改为1.5GB (1500000000字节)
         max_size=1500000000
         
         echo "文件大小: $(numfmt --to=iec $file_size_bytes)"
         
         if [ $file_size_bytes -gt $max_size ]; then
-          echo "文件过大，进行分割..."
+          echo "文件大小超过1.5GB，进行分割..."
+          # 分割大小保持1.4GB (1400M)
           split_size=1400M
           
           split -b "$split_size" -d -a 3 "$pack_name" "upload/${pack_name%.zip}_part"
