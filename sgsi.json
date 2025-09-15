@@ -9,5 +9,6 @@
   "make_smartisanos": false,
   "make_zui": false,
   "make_super": false,
-  "make_wetransfer": true
+  "upload_artifact": false,
+  "uploa_wetransfer": true
 }
