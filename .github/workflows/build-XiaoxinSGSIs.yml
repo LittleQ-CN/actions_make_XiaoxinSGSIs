@@ -39,6 +39,7 @@ jobs:
         config[pack_sgsi]=$(jq -r '.pack_sgsi' sgsi.json)
         config[make_miui]=$(jq -r '.make_miui' sgsi.json)
         config[make_flyme]=$(jq -r '.make_flyme' sgsi.json)
+        config[make_coloros.json)
         config[make_coloros]=$(jq -r '.make_coloros' sgsi.json)
         config[make_h2os]=$(jq -r '.make_h2os' sgsi.json)
         config[make_smartisanos]=$(jq -r '.make_smartisanos' sgsi.json)
@@ -77,7 +78,7 @@ jobs:
       continue-on-error: true
       uses: robinraju/release-downloader@v1
       with:
-        repository: "xiaoxindada/SGSI-build-tool"
+        仓库: "xiaoxindada/SGSI-build-tool"
         tag: "v1.9"
         fileName: "SGSI-build-tool.tar"
         out-file-path: "${{ github.workspace }}/SGSI-build-tool-release.tar"
@@ -156,29 +157,15 @@ jobs:
         echo "执行环境初始化..."
         cd SGSI-build-tool/10
         
-        # 预先修复权限问题
-        echo "修复权限问题..."
-        sudo chmod -R a+w bin || true
-        sudo chmod -R a+w make || true
+        # 仅设置脚本执行权限
+        find . -type f -name "*.sh" -exec chmod +x {} \;
         
-        chmod +x setup.sh
-        sudo bash setup.sh || {
+        # 执行初始化
+        ./setup.sh || {
           echo "::error::环境初始化失败"
           exit 1
         }
         cd ../../
-        
-        echo "清理危险命令..."
-        find SGSI-build-tool -type f -exec grep -lZ 'chown\|sudo' {} + | xargs -0 sed -i '/chown\|sudo/d'
-        
-        echo "设置脚本权限..."
-        # 只给 .sh 文件添加执行权限
-        find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
-        
-        # 单独处理 bin 目录，避免修改 .py 文件权限
-        if [ -d "$BUILD_DIR/bin" ]; then
-          find "$BUILD_DIR/bin" -type f \( -name "*" ! -name "*.py" \) -exec chmod +x {} \;
-        fi
         
         echo "✅ 初始化完成"
         echo "::endgroup::"
@@ -599,7 +586,7 @@ jobs:
         clean_rom_name=$(echo "$rom_name" | tr -cd '[:alnum:]_.-' | sed 's/\.\.*/./g')
         
         # 提取版本号
-        version=$(echo "$clean_rom_name" | grep -oE '[Vv][0-9][0-9a-zA-Z.]*' | head -1 | sed 's/[Vv]//' || echo "unknown")
+        version=$(echo "$clean_rom_name" | grep -oE '[Vv][0-9][0-9a-zA-Z.]*' | head -1 | sed 's/[Vv]//' | echo "unknown")
         
         # 生成中文可读时间戳 (格式: 月日+时间段+时+分)
         hour=$(date +"%H")
