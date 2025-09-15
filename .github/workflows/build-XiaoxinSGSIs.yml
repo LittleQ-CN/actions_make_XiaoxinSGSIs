@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs
 
 on:
@@ -27,9 +28,9 @@ jobs:
       run: |
         echo "🛠️ 安装构建工具..."
         sudo apt-get update
-        sudo apt-get install -y brotli xz-utils android-sdk-libsparse-utils \
-          simg2img img2simg p7zip-full jq tree e2fsprogs
-        echo "✅ 工具安装完成"
+        sudo apt-get install -y axel brotli xz-utils android-sdk-libsparse-utils \
+          simg2img img2simg p7zip-full jq tree e2fsprogs cpio
+        echo "✅ 工具安装完成 (包含axel)"
       
     - name: 检出代码
       uses: actions/checkout@v4
@@ -40,7 +41,7 @@ jobs:
         echo "📝 加载配置文件..."
         [ ! -f "sgsi.json" ] && { echo "::error::未找到sgsi.json配置文件"; exit 1; }
         
-        # 配置项定义
+        # 修正配置项拼写错误
         declare -A CONFIG_MAP=(
           [rom_url]=required
           [rom_name]=required
@@ -53,7 +54,7 @@ jobs:
           [make_zui]=required
           [make_super]=required
           [upload_artifact]=required
-          [upload_wetransfer]=required
+          [upload_wetransfer]=required  # 修正拼写错误
         )
         
         # 解析配置
@@ -69,7 +70,7 @@ jobs:
             fi
           fi
           
-          if [ "$key" = "uploa_wetransfer" ]; then
+          if [ "$key" = "upload_wetransfer" ]; then
             echo "upload_transfer=$value" >> $GITHUB_ENV
           else
             echo "$key=$value" >> $GITHUB_ENV
@@ -155,11 +156,11 @@ jobs:
           exit 1
         fi
         
-        # 解压ROM文件（使用7z替代unzip）
+        # 高效解压ROM文件（使用7z）
         echo "解压当前目录的刷机包中......"
-        7z x "$rom_name" -y || {
+        7z x "$rom_name" -y -bsp1 -bso0 || {
           echo "::warning::解压失败，尝试强制解压"
-          7z x -t* "$rom_name" -y -oextracted || {
+          7z x -t* "$rom_name" -y -oextracted -bsp1 -bso0 || {
             echo "::error::无法解压ROM文件"
             exit 1
           }
@@ -183,13 +184,13 @@ jobs:
         # 情况2：存在压缩的dat文件
         elif [ -f "system.new.dat.br" ]; then
           echo "🧪 解压brotli格式..."
-          brotli -d system.new.dat.br
+          brotli -d -v system.new.dat.br
           rm -f system.new.dat.br
           found_img=true
           
         elif [ -f "system.new.dat.xz" ]; then
           echo "🧪 解压xz格式..."
-          xz -d system.new.dat.xz
+          xz -d -v system.new.dat.xz
           found_img=true
         
         # 情况3：需要转换dat文件
@@ -198,26 +199,37 @@ jobs:
           python3 sdat2img.py system.transfer.list system.new.dat system.img
           rm -f system.new.dat system.transfer.list
           found_img=true
+        
+        # 情况4：存在super.img
+        elif [ -f "super.img" ]; then
+          echo "🔍 找到super.img，提取system分区..."
+          simg2img super.img super_raw.img
+          lpunpack super_raw.img
+          mv system_a.img system.img
+          found_img=true
         fi
         
         # 如果仍未找到，尝试深度搜索
         if [ "$found_img" = false ]; then
-          echo "深度搜索system.img..."
-          system_path=$(find . -type f -name "system.img" | head -n1)
+          echo "深度搜索system镜像..."
+          
+          # 搜索system.img
+          system_path=$(find . -type f \( -name "system.img" -o -name "system.*img" \) | head -n1)
           
           if [ -n "$system_path" ]; then
-            echo "在子目录中找到system.img: $system_path"
-            mv "$system_path" .
+            echo "在子目录中找到system镜像: $system_path"
+            mv "$system_path" system.img
             found_img=true
             
             # 尝试移动其他相关文件
-            mv $(dirname "$system_path")/system.* . >/dev/null 2>&1 || true
+            mv "$(dirname "$system_path")"/system.* . >/dev/null 2>&1 || true
           fi
           
           # 检查system文件夹
           if [ -d "system" ]; then
             echo "🔍 找到system目录，尝试创建镜像..."
-            find system -print0 | sort -z | cpio -ov -0 -H newc | gzip -9 > system.img
+            echo "使用cpio创建system.img..."
+            (cd system; find . | cpio -o -H newc | gzip -9) > system.img
             found_img=true
           fi
         fi
@@ -226,6 +238,13 @@ jobs:
         if [ "$found_img" = true ] && [ -f "system.img" ]; then
           SYSTEM_SIZE=$(du -sh system.img | awk '{print $1}')
           echo "✅ 系统镜像准备完成 (大小: $SYSTEM_SIZE)"
+          
+          # 如果是稀疏镜像，转换为原始格式
+          if file system.img | grep -q "sparse"; then
+            echo "🔧 转换稀疏镜像为原始格式..."
+            simg2img system.img system_raw.img
+            mv system_raw.img system.img
+          fi
         else
           echo "::error::未找到有效的system.img"
           echo "当前目录内容:"
@@ -240,15 +259,12 @@ jobs:
         
         # 尝试挂载系统镜像
         mkdir -p system_mount
-        sudo mount -t ext4 -o ro,loop system.img system_mount 2>/dev/null || {
-          echo "::warning::挂载失败，尝试其他方法"
-          # 尝试使用simg2img转换
-          if file system.img | grep -q "sparse"; then
-            echo "检测到稀疏镜像，正在转换..."
-            simg2img system.img system_raw.img
-            mv system_raw.img system.img
-            sudo mount -t ext4 -o ro,loop system.img system_mount || true
-          fi
+        sudo mount -t ext4 -o ro,noload,loop system.img system_mount 2>/dev/null || {
+          # 如果挂载失败，尝试修复镜像
+          echo "::warning::挂载失败，尝试修复镜像..."
+          e2fsck -yf system.img || true
+          resize2fs -M system.img || true
+          sudo mount -t ext4 -o ro,noload,loop system.img system_mount || true
         }
         
         # 查找build.prop文件
@@ -258,6 +274,7 @@ jobs:
           "system_mount/build.prop"
           "system_mount/system/system/build.prop"
           "system_mount/vendor/build.prop"
+          "system_mount/system/vendor/build.prop"
         )
         
         for path in "${paths[@]}"; do
@@ -270,11 +287,11 @@ jobs:
         # 提取版本信息
         if [ -n "$BUILD_PROPS" ]; then
           echo "找到build.prop: $BUILD_PROPS"
-          ROM_VERSION=$(grep -m1 "ro.build.version.incremental" "$BUILD_PROPS" | cut -d'=' -f2)
-          ANDROID_VERSION=$(grep -m1 "ro.build.version.release" "$BUILD_PROPS" | cut -d'=' -f2)
-          SECURITY_PATCH=$(grep -m1 "ro.build.version.security_patch" "$BUILD_PROPS" | cut -d'=' -f2)
-          echo "rom_version=$ROM_VERSION" >> $GITHUB_ENV
-          echo "android_version=$ANDROID_VERSION" >> $GITHUB_ENV
+          ROM_VERSION=$(grep -m1 "ro.build.version.incremental" "$BUILD_PROPS" | cut -d'=' -f2 || true)
+          ANDROID_VERSION=$(grep -m1 "ro.build.version.release" "$BUILD_PROPS" | cut -d'=' -f2 || true)
+          SECURITY_PATCH=$(grep -m1 "ro.build.version.security_patch" "$BUILD_PROPS" | cut -d'=' -f2 || true)
+          echo "rom_version=${ROM_VERSION:-未知}" >> $GITHUB_ENV
+          echo "android_version=${ANDROID_VERSION:-未知}" >> $GITHUB_ENV
           echo "security_patch=${SECURITY_PATCH:-未知}" >> $GITHUB_ENV
         else
           echo "::warning::未找到build.prop文件"
@@ -295,6 +312,11 @@ jobs:
         sed -i 's/chmod -R 777/# chmod -R 777/g' make.sh
         echo "🛡️ 跳过权限修改操作"
         
+        # 避免卡退：禁用可能需要交互的部分
+        sed -i 's/read pause/# read pause/g' make.sh
+        sed -i 's/^pause$/echo "跳过暂停"/g' make.sh
+        echo "⏭️ 禁用交互式暂停"
+        
         # 配置super模式
         if [ "$make_super" = 'true' ]; then
           sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
@@ -304,6 +326,7 @@ jobs:
         # 应用品牌特定修复
         BRANDS=("MIUI" "Flyme" "ColorOS" "H2OS" "SmartisanOS" "ZUI")
         KEYS=("make_miui" "make_flyme" "make_coloros" "make_h2os" "make_smartisanos" "make_zui")
+        brand_found=false
         
         for i in "${!BRANDS[@]}"; do
           key="${KEYS[$i]}"
@@ -315,18 +338,26 @@ jobs:
           if [ "$key_value" = 'true' ] && [ -f "../fix/${brand}.sh" ]; then
             cp -f "../fix/${brand}.sh" fixbug/fixbug.sh
             echo "brand=$brand" >> $GITHUB_ENV
+            brand_found=true
             echo "🔧 应用${brand}修复"
             break
           fi
         done
         
-        # 确保修复脚本存在
-        [ -f "fixbug/fixbug.sh" ] || {
-          echo "# 基础修复脚本" > fixbug/fixbug.sh
-          chmod +x fixbug/fixbug.sh
+        # 仅在找到品牌修复时才启用修复脚本
+        if [ "$brand_found" = false ]; then
           echo "brand=通用" >> $GITHUB_ENV
-          echo "⚠️ 使用基础修复脚本"
-        }
+          echo "ℹ️ 未指定特定品牌，跳过修复脚本"
+          
+          # 创建空修复脚本，但禁用其执行
+          echo "#!/bin/bash" > fixbug/fixbug.sh
+          echo "echo '通用品牌，无需特殊修复'" >> fixbug/fixbug.sh
+          chmod +x fixbug/fixbug.sh
+          
+          # 在构建脚本中注释掉修复步骤
+          sed -i 's/\. \$bin\/fixbug\.sh/# 通用品牌，跳过修复/g' make.sh
+          sed -i 's/\. \$bin\/fixbug\.sh/# 通用品牌，跳过修复/g' dynamic_SGSI.sh 2>/dev/null || true
+        fi
         
         echo "✅ 构建配置完成"
         
@@ -334,10 +365,34 @@ jobs:
       run: |
         echo "🏗️ 开始构建SGSI..."
         cd $BUILD_DIR
+        
         # 添加执行权限
         find . -type f -name "*.sh" -exec chmod +x {} \;
         
-        time bash make.sh
+        # 使用nohup防止卡退
+        echo "启动构建进程..."
+        nohup bash -c "time bash make.sh" > build.log 2>&1 &
+        BUILD_PID=$!
+        
+        # 监控构建进程
+        echo "监控构建进程 (PID: $BUILD_PID)..."
+        while ps -p $BUILD_PID > /dev/null; do
+          echo "构建运行中..."
+          tail -n 10 build.log || true
+          sleep 60
+        done
+        
+        # 检查构建结果
+        wait $BUILD_PID
+        BUILD_EXIT=$?
+        
+        if [ $BUILD_EXIT -ne 0 ]; then
+          echo "::error::构建失败，退出代码: $BUILD_EXIT"
+          echo "构建日志:"
+          cat build.log || true
+          exit 1
+        fi
+        
         if [ ! -d "out" ]; then
           echo "::error::构建失败，未找到输出目录"
           echo "构建日志:"
@@ -359,8 +414,8 @@ jobs:
         echo "安全补丁: ${security_patch:-未知}" >> version-info.txt
         echo "构建日期: $(date +"%Y-%m-%d %H:%M:%S %Z")" >> version-info.txt
         
-        # 创建压缩包
-        7za a -t7z -mx=9 "$OUTPUT_FILE" SGSI/* version-info.txt
+        # 创建压缩包（使用最高压缩级别）
+        7za a -t7z -mx=9 -mmt=4 "$OUTPUT_FILE" SGSI/* version-info.txt
         if [ ! -f "$OUTPUT_FILE" ]; then
           echo "::error::打包失败"
           echo "SGSI目录内容:"
