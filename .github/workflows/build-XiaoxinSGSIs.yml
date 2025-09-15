@@ -23,6 +23,14 @@ jobs:
         df -h
         echo "✅ 工作区清理完成"
       
+    - name: 安装必要工具
+      run: |
+        echo "🛠️ 安装构建工具..."
+        sudo apt-get update
+        sudo apt-get install -y brotli xz-utils android-sdk-libsparse-utils \
+          simg2img img2simg p7zip-full jq tree e2fsprogs
+        echo "✅ 工具安装完成"
+      
     - name: 检出代码
       uses: actions/checkout@v4
       
@@ -133,6 +141,12 @@ jobs:
         echo "🖼️ 准备系统镜像..."
         cd $ROM_DIR
         
+        # 下载 sdat2img 脚本
+        echo "📥 下载 sdat2img 工具..."
+        curl -sLO https://raw.githubusercontent.com/xpirt/sdat2img/master/sdat2img.py
+        chmod +x sdat2img.py
+        echo "✅ sdat2img工具准备就绪"
+        
         # 解压ROM文件
         unzip -q "$rom_name" || true
         
@@ -151,7 +165,7 @@ jobs:
         # 转换dat格式到img
         if [ -f "system.new.dat" ] && [ -f "system.transfer.list" ]; then
           echo "🔧 转换dat到img..."
-          sdat2img system.transfer.list system.new.dat system.img
+          python3 sdat2img.py system.transfer.list system.new.dat system.img
           rm -f system.new.dat system.transfer.list
         fi
         
@@ -209,7 +223,10 @@ jobs:
           key="${KEYS[$i]}"
           brand="${BRANDS[$i]}"
           
-          if [ "${!key}" = 'true' ] && [ -f "../fix/${brand}.sh" ]; then
+          # 使用间接引用获取环境变量值
+          key_value=$(eval echo \$$key)
+          
+          if [ "$key_value" = 'true' ] && [ -f "../fix/${brand}.sh" ]; then
             cp -f "../fix/${brand}.sh" fixbug/fixbug.sh
             echo "brand=$brand" >> $GITHUB_ENV
             echo "🔧 应用${brand}修复"
@@ -264,7 +281,7 @@ jobs:
         DOWNLOAD_URL=$(grep 'Download Link:' transfer.log | cut -d' ' -f3-)
         
         if [ -n "$DOWNLOAD_URL" ]; then
-          echo "##   SGSI下载" >> $GITHUB_STEP_SUMMARY
+          echo "## SGSI下载" >> $GITHUB_STEP_SUMMARY
           echo "**文件**: $OUTPUT_FILE" >> $GITHUB_STEP_SUMMARY
           echo "**大小**: $OUTPUT_SIZE" >> $GITHUB_STEP_SUMMARY
           echo "**下载**: [WeTransfer]($DOWNLOAD_URL)" >> $GITHUB_STEP_SUMMARY
