@@ -12,8 +12,7 @@ jobs:
     steps:
     - name: 初始化环境
       run: |
-        rm -rf SGSI-build-tool upload tmp_fix || true
-        mkdir -p tmp_fix
+        rm -rf SGSI-build-tool upload || true
         df -h
         
     - name: 检出代码库
@@ -37,7 +36,7 @@ jobs:
     - name: 安装依赖工具
       run: |
         sudo apt-get update
-        sudo apt-get install -y jq pigz
+        sudo apt-get install -y jq pigz aria2
         
         if ! command -v jq &> /dev/null; then
           echo "::error::❌ jq 未安装成功"
@@ -142,34 +141,6 @@ jobs:
         echo "  打包名称: $pack_sgsi"
         echo "  Artifact上传: $upload_artifact"
         echo "  WeTransfer上传: $upload_wetransfer"
-        
-        # 复制修复脚本
-        if [ -n "$current_type" ]; then
-          # 大小写兼容处理
-          uppercase_type="${current_type^}"
-          lowercase_type="${current_type}"
-          
-          script_path=""
-          
-          # 优先尝试大写文件名
-          if [ -f "fix/${uppercase_type}.sh" ]; then
-            script_path="fix/${uppercase_type}.sh"
-          elif [ -f "fix/${lowercase_type}.sh" ]; then
-            script_path="fix/${lowercase_type}.sh"
-          fi
-          
-          if [ -n "$script_path" ]; then
-            cp "$script_path" tmp_fix/fixbug.sh
-            chmod +x tmp_fix/fixbug.sh
-            echo "✅ 使用修复脚本: $script_path"
-          else
-            echo "::warning::⚠️ 未找到 ${current_type} 修复脚本，将使用默认构建流程"
-            # 创建空修复脚本防止后续步骤失败
-            touch tmp_fix/fixbug.sh
-          fi
-        else
-          echo "ℹ️ 未启用ROM类型，跳过修复脚本复制"
-        fi
     
     - name: 下载构建工具
       timeout-minutes: 5
@@ -182,10 +153,10 @@ jobs:
           ((attempts++))
           echo "尝试 #$attempts 下载构建工具..."
           
-          if curl -L --fail --retry 3 -o SGSI-build-tool.tar "$tool_url"; then
+          if aria2c -x8 -s8 -k1M --retry-wait=30 "$tool_url" -o SGSI-build-tool.tar; then
             echo "✅ 下载成功"
             break
-          elif wget -c -O SGSI-build-tool.tar "$tool_url"; then
+          elif curl -L --fail --retry 3 -o SGSI-build-tool.tar "$tool_url"; then
             echo "✅ 下载成功"
             break
           else
@@ -227,13 +198,8 @@ jobs:
         mkdir -p "$(dirname "$rom_path")"
         
         # 使用最佳下载工具
-        if command -v aria2c &>/dev/null; then
-          echo "使用 aria2c 下载"
-          aria2c -x8 -s8 -k1M --retry-wait=30 "${{ env.rom_url }}" -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")"
-        else
-          echo "使用 curl 下载"
-          curl -L -C - --retry 30 --retry-delay 30 "${{ env.rom_url }}" -o "$rom_path"
-        fi
+        echo "使用 aria2c 下载"
+        aria2c -x8 -s8 -k1M --retry-wait=30 "${{ env.rom_url }}" -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")"
         
         # 验证文件大小
         min_size=$((100*1024*1024))  # 100MB
@@ -247,17 +213,26 @@ jobs:
         echo "✅ 下载完成，大小: $((file_size/1024/1024))MB"
     
     - name: 处理ROM类型
-      if: ${{ env.rom_type != 'none' }}
       run: |
         cd SGSI-build-tool/10
         
-        # 复制修复脚本
-        if [ -f "../../tmp_fix/fixbug.sh" ]; then
-          cp -f ../../tmp_fix/fixbug.sh fixbug/fixbug.sh
+        # 应用通用修复脚本
+        if [ -f "../../fix/fixbug.sh" ]; then
+          cp ../../fix/fixbug.sh fixbug/fixbug.sh
           chmod +x fixbug/fixbug.sh
-          echo "🛠️ 已应用 ${{ env.rom_type }} 修复脚本"
+          echo "🛠️ 应用通用修复脚本..."
+          ./fixbug/fixbug.sh || echo "⚠️ 通用修复脚本执行异常"
         fi
         
+        # 应用ROM类型专用脚本
+        if [ -n "${{ env.rom_type }}" ] && [ -f "../../fix/${{ env.rom_type }}_fixbug.sh" ]; then
+          cp "../../fix/${{ env.rom_type }}_fixbug.sh" "fixbug/${{ env.rom_type }}_fixbug.sh"
+          chmod +x "fixbug/${{ env.rom_type }}_fixbug.sh"
+          echo "🛠️ 应用${{ env.rom_type }}专用修复脚本..."
+          ./fixbug/${{ env.rom_type }}_fixbug.sh || echo "⚠️ ${{ env.rom_type }}修复脚本执行异常"
+        fi
+        
+        # ROM类型特殊处理
         case "${{ env.rom_type }}" in
           coloros)
             echo "🔓 解密ColorOS ROM..."
@@ -271,6 +246,10 @@ jobs:
               echo "::error::❌ ColorOS解密失败"
               exit 1
             fi
+            ;;
+          miui)
+            echo "🍚 执行MIUI特殊处理..."
+            # 这里可以添加MIUI特定的处理逻辑
             ;;
           *)
             echo "ℹ️ ROM类型: ${{ env.rom_type }}，无需特殊处理"
@@ -435,13 +414,15 @@ jobs:
           echo "✂️ 分割大文件 (大小: $((file_size/1024/1024))MB)"
           split -b 1000M -d "$pack_name" "${pack_name}_part"
           rm "$pack_name"
+          packed_files=($(ls "${pack_name}"_part*))
         else
+          packed_files=("$pack_name")
           echo "ℹ️ 文件大小: $((file_size/1024/1024))MB，无需分割"
         fi
         
         # 准备上传
         mkdir -p ../upload
-        mv "${pack_name}"* ../upload/ || true
+        mv "${packed_files[@]}" ../upload/ || true
         
         # 设置上传文件路径
         output_file=$(ls $PWD/../upload/$pack_name* | head -n1)
@@ -461,7 +442,11 @@ jobs:
         generate_release_notes: true
         body: |
           构建 #${{ github.run_number }} 已完成！
-          查看构建日志获取镜像压缩详情
+          
+          **关键信息**:
+          - ROM名称: ${{ env.rom_name }}
+          - ROM类型: ${{ env.rom_type || '无' }}
+          - 构建时间: ${{ steps.date.outputs.formattedDate }}
           
           ${{ env.upload_wetransfer == 'true' && '>  ️ **重要提示**：本构建包含WeTransfer下载链接（有效期7天），请在作业摘要中查看详情！' || '' }}
     
@@ -489,14 +474,11 @@ jobs:
         FILE_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
         echo "⬆️ 开始上传文件: $(basename "$OUTPUT_FILE") (大小: $FILE_SIZE)..."
         
-        # 下载文件传输工具
-        echo "🛠️ 安装 file-transfer 工具..."
-        curl -sL https://git.io/file-transfer | sh
-        
         # 计算到期日期
         EXPIRY_DATE=$(date -d "+7 days" "+%Y-%m-%d")
         
         # 上传并获取结果
+        curl -sL https://git.io/file-transfer | sh
         TRANSFER_OUTPUT=$(./transfer wet "$OUTPUT_FILE")
         echo "$TRANSFER_OUTPUT"
         
@@ -512,7 +494,7 @@ jobs:
           echo "大小: $FILE_SIZE" >> $GITHUB_STEP_SUMMARY
           
           # 设置环境变量供后续步骤使用
-          echo "DOWNLOAD_LINK=$DOWNLOAD_LINK" >> $GITHUB_ENV
+          echo "WETRANSFER_LINK=$DOWNLOAD_LINK" >> $GITHUB_ENV
           echo "EXPIRY_DATE=$EXPIRY_DATE" >> $GITHUB_ENV
         else
           echo "::warning::⚠️ 未找到下载链接"
@@ -541,9 +523,9 @@ jobs:
         fi
         
         # WeTransfer链接信息
-        if [[ -n "$DOWNLOAD_LINK" && -n "$EXPIRY_DATE" ]]; then
+        if [[ -n "$WETRANSFER_LINK" && -n "$EXPIRY_DATE" ]]; then
           echo ""
-          echo "🌐 WeTransfer下载链接: $DOWNLOAD_LINK"
+          echo "🌐 WeTransfer下载链接: $WETRANSFER_LINK"
           echo "⏳ 链接有效期至: $EXPIRY_DATE"
         fi
         
