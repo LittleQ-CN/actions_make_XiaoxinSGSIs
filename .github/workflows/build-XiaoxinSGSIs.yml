@@ -78,7 +78,7 @@ jobs:
         echo "📦 下载工具箱..."
         mkdir -p $BUILD_DIR/SGSI
         curl -# -L "$TOOLKIT_URL" -o toolkit.tar
-        tar -xf toolkit.tar
+        tar -xf toolkit.tar -C $BUILD_DIR/
 
     - name: 下载ROM
       run: |
@@ -97,9 +97,8 @@ jobs:
         echo "复制ROM文件到构建目录..."
         cp $ROM_DIR/"$ROM_NAME" $BUILD_DIR/tmp/
         
-        # 将工具复制到构建目录
-        echo "复制工具到构建目录..."
-        cp -r SGSI-build-tool/10/* $BUILD_DIR/
+        # 不再复制工具（已在"获取工具箱"步骤处理）
+        echo "工具箱已就位，无需再次复制"
 
     - name: 配置构建选项
       run: |
