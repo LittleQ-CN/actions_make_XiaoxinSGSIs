@@ -1,3 +1,6 @@
+我理解您需要一个完整的整合方案，将带进度条的下载工具和ROM下载步骤整合到整个工作流中。以下是完整的 `build.yml` 文件，包含了优化的下载进度显示：
+
+```yaml
 name: build_XiaoxinSGSIs
 
 on:
@@ -142,40 +145,114 @@ jobs:
         echo "  Artifact上传: $upload_artifact"
         echo "  WeTransfer上传: $upload_wetransfer"
     
-    - name: 下载构建工具
+    - name: 下载构建工具（带进度条）
       timeout-minutes: 5
       run: |
         tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
-        attempts=0
-        max_attempts=3
+        filename="SGSI-build-tool.tar"
         
-        while [ $attempts -lt $max_attempts ]; do
-          ((attempts++))
-          echo "尝试 #$attempts 下载构建工具..."
-          
-          if aria2c -x8 -s8 -k1M --retry-wait=30 "$tool_url" -o SGSI-build-tool.tar; then
-            echo "✅ 下载成功"
-            break
-          elif curl -L --fail --retry 3 -o SGSI-build-tool.tar "$tool_url"; then
-            echo "✅ 下载成功"
-            break
+        # 获取文件大小函数
+        get_file_size() {
+          curl -sI "$1" | grep -i 'content-length' | awk '{print $2}' | tr -d '\r'
+        }
+        
+        # 格式化文件大小函数
+        format_size() {
+          local size=$1
+          if [ $size -ge $((1024*1024*1024)) ]; then
+            printf "%.1fGB" $(echo "scale=1; $size/(1024*1024*1024)" | bc)
+          elif [ $size -ge $((1024*1024)) ]; then
+            printf "%.1fMB" $(echo "scale=1; $size/(1024*1024)" | bc)
+          elif [ $size -ge 1024 ]; then
+            printf "%.1fKB" $(echo "scale=1; $size/1024" | bc)
           else
-            echo "❌ 下载失败，等待10秒后重试..."
-            sleep 10
+            printf "%dB" $size
           fi
-        done
+        }
         
-        if [ ! -f SGSI-build-tool.tar ]; then
-          echo "::error::❌ 工具包下载失败"
+        # 获取文件大小
+        file_size=$(get_file_size "$tool_url")
+        if [ -z "$file_size" ]; then
+          file_size=$((150*1024*1024))  # 默认150MB
+          echo "⚠️ 无法获取文件大小，使用默认值: $(format_size $file_size)"
+        else
+          echo "ℹ️ 文件大小: $(format_size $file_size)"
+        fi
+        
+        formatted_size=$(format_size $file_size)
+        echo "⬇️ 下载 $filename [$formatted_size]"
+        
+        # 进度条函数
+        progress_bar() {
+          local total=$1
+          local current=$2
+          local width=20  # 进度条宽度
+          local percent=$((current * 100 / total))
+          local progress=$((current * width / total))
+          local rest=$((width - progress))
+          
+          printf "\r["
+          printf "%${progress}s" | tr ' ' '#'
+          printf "%${rest}s" | tr ' ' '-'
+          printf "] %3d%%" $percent
+        }
+        
+        # 使用curl下载并显示进度
+        download_with_curl() {
+          echo "⚙️ 使用 curl"
+          curl -L --progress-bar -o "$filename" "$tool_url" \
+            | while IFS= read -r line; do
+                if [[ $line =~ ([0-9]+)\ ([0-9.]+)% ]]; then
+                  current=${BASH_REMATCH[1]}
+                  progress_bar $file_size $current
+                fi
+              done
+          echo  # 新行
+        }
+        
+        # 使用aria2c下载并显示进度
+        download_with_aria2c() {
+          echo "⚙️ 使用 aria2c"
+          aria2c -x8 -s8 -k1M --show-console-readout=false --summary-interval=1 \
+                 "$tool_url" -o "$filename" 2>&1 \
+            | while IFS= read -r line; do
+                if [[ $line =~ \(([0-9]*)%\) ]]; then
+                  percent=${BASH_REMATCH[1]}
+                  current=$((file_size * percent / 100))
+                  progress_bar $file_size $current
+                fi
+              done
+          echo  # 新行
+        }
+        
+        # 尝试下载
+        if command -v aria2c &> /dev/null; then
+          download_with_aria2c
+        else
+          download_with_curl
+        fi
+        
+        # 验证下载
+        if [ ! -f "$filename" ]; then
+          echo "::error::❌ 下载失败"
           exit 1
         fi
         
-        if ! tar -tf SGSI-build-tool.tar >/dev/null; then
+        # 验证文件大小
+        actual_size=$(stat -c%s "$filename")
+        if [ $actual_size -lt $((file_size * 9 / 10)) ]; then
+          echo "::error::❌ 文件大小不匹配 (应为: $formatted_size, 实际: $(format_size $actual_size))"
+          exit 1
+        fi
+        
+        # 验证压缩包完整性
+        if ! tar -tf "$filename" >/dev/null 2>&1; then
           echo "::error::❌ 工具包损坏"
           exit 1
         fi
         
-        echo "🛠️ 工具包验证通过"
+        echo "✅ 下载完成 [$(format_size $actual_size)]"
+        echo "✅ 工具包验证通过"
     
     - name: 设置构建环境
       run: |
@@ -188,29 +265,123 @@ jobs:
         
         echo "🛠️ 构建环境已设置"
     
-    - name: 下载ROM文件
+    - name: 下载ROM文件（带进度条）
       timeout-minutes: 30
       run: |
         rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
+        rom_url="${{ env.rom_url }}"
+        filename="${{ env.rom_name }}"
         echo "⬇️ 下载ROM: ${{ env.rom_url }}"
         
         # 确保目录存在
         mkdir -p "$(dirname "$rom_path")"
         
-        # 使用最佳下载工具
-        echo "使用 aria2c 下载"
-        aria2c -x8 -s8 -k1M --retry-wait=30 "${{ env.rom_url }}" -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")"
+        # 获取文件大小函数
+        get_file_size() {
+          curl -sI "$1" | grep -i 'content-length' | awk '{print $2}' | tr -d '\r'
+        }
         
-        # 验证文件大小
-        min_size=$((100*1024*1024))  # 100MB
-        file_size=$(stat -c%s "$rom_path" 2>/dev/null || echo 0)
+        # 格式化文件大小函数
+        format_size() {
+          local size=$1
+          if [ $size -ge $((1024*1024*1024)) ]; then
+            printf "%.1fGB" $(echo "scale=1; $size/(1024*1024*1024)" | bc)
+          elif [ $size -ge $((1024*1024)) ]; then
+            printf "%.1fMB" $(echo "scale=1; $size/(1024*1024)" | bc)
+          elif [ $size -ge 1024 ]; then
+            printf "%.1fKB" $(echo "scale=1; $size/1024" | bc)
+          else
+            printf "%dB" $size
+          fi
+        }
         
-        if [ $file_size -lt $min_size ]; then
-          echo "::error::❌ ROM文件异常 (大小: $((file_size/1024/1024))MB)"
+        # 获取文件大小
+        file_size=$(get_file_size "$rom_url")
+        if [ -z "$file_size" ]; then
+          # 使用默认大小提示（不强制）
+          min_size=$((100*1024*1024))  # 100MB
+          echo "⚠️ 无法获取ROM文件大小，将使用默认验证阈值: $(format_size $min_size)"
+        else
+          echo "ℹ️ ROM大小: $(format_size $file_size)"
+        fi
+        
+        formatted_size=$(format_size ${file_size:-0})
+        echo "⬇️ 下载 $filename [${formatted_size:-未知大小}]"
+        
+        # 进度条函数（同上）
+        progress_bar() {
+          local total=$1
+          local current=$2
+          local width=20  # 进度条宽度
+          local percent=$((current * 100 / total))
+          local progress=$((current * width / total))
+          local rest=$((width - progress))
+          
+          printf "\r["
+          printf "%${progress}s" | tr ' ' '#'
+          printf "%${rest}s" | tr ' ' '-'
+          printf "] %3d%%" $percent
+        }
+        
+        # 使用aria2c下载并显示进度（优先）
+        if command -v aria2c &> /dev/null; then
+          echo "⚙️ 使用 aria2c"
+          aria2c -x8 -s8 -k1M --show-console-readout=false --summary-interval=1 \
+                 "$rom_url" -d "$(dirname "$rom_path")" -o "$filename" 2>&1 \
+            | while IFS= read -r line; do
+                if [[ $line =~ \(([0-9]*)%\) ]]; then
+                  percent=${BASH_REMATCH[1]}
+                  # 如果知道文件大小，则计算当前字节数，否则用百分比模拟
+                  if [ -n "$file_size" ]; then
+                    current=$((file_size * percent / 100))
+                    progress_bar $file_size $current
+                  else
+                    # 未知文件大小时只显示百分比
+                    printf "\r[%-20s] %3d%%" $(printf "%${percent}s" | tr ' ' '#') $percent
+                  fi
+                fi
+              done
+          echo  # 新行
+        else
+          # 使用curl作为备选
+          echo "⚙️ 使用 curl"
+          curl -L --progress-bar -o "$rom_path" "$rom_url" \
+            | while IFS= read -r line; do
+                if [[ $line =~ ([0-9]+)\ ([0-9.]+)% ]]; then
+                  current=${BASH_REMATCH[1]}
+                  if [ -n "$file_size" ]; then
+                    progress_bar $file_size $current
+                  else
+                    percent=${BASH_REMATCH[2]}
+                    printf "\r[%-20s] %3d%%" $(printf "%${percent}s" | tr ' ' '#') ${BASH_REMATCH[2]%.*}
+                  fi
+                fi
+              done
+          echo  # 新行
+        fi
+        
+        # 验证下载的文件
+        if [ ! -f "$rom_path" ]; then
+          echo "::error::❌ ROM下载失败"
           exit 1
         fi
         
-        echo "✅ 下载完成，大小: $((file_size/1024/1024))MB"
+        actual_size=$(stat -c%s "$rom_path")
+        if [ -n "$file_size" ]; then
+          if [ $actual_size -lt $((file_size * 9 / 10)) ]; then
+            echo "::error::❌ ROM大小不匹配 (应为: $(format_size $file_size), 实际: $(format_size $actual_size))"
+            exit 1
+          fi
+        else
+          # 没有原始文件大小时，验证最小大小
+          min_size=$((100*1024*1024))  # 100MB
+          if [ $actual_size -lt $min_size ]; then
+            echo "::error::❌ ROM文件异常 (大小: $(format_size $actual_size))"
+            exit 1
+          fi
+        fi
+        
+        echo "✅ ROM下载完成 [$(format_size $actual_size)]"
     
     - name: 处理ROM类型
       run: |
