@@ -1,4 +1,3 @@
-
 name: build_XiaoxinSGSIs
 
 on:
@@ -9,11 +8,11 @@ env:
   BUILD_DIR: SGSI-build-tool/10
   ROM_DIR: tmp
   TOOLKIT_URL: https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
+  MAX_LOG_LINES: 1000
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    if: github.event.repository.owner.id == github.event.sender.id
     timeout-minutes: 180
     
     steps:
@@ -22,452 +21,295 @@ jobs:
         echo "🔄 清理工作区..."
         rm -rf SGSI-build-tool upload || true
         df -h
-        echo "✅ 工作区清理完成"
-      
+        
     - name: 安装必要工具
       run: |
         echo "🛠️ 安装构建工具..."
         sudo apt-get update
         sudo apt-get install -y axel brotli xz-utils android-sdk-libsparse-utils \
-          simg2img img2simg p7zip-full jq tree e2fsprogs cpio
-        echo "✅ 工具安装完成 (包含axel)"
-      
-    - name: 检出代码
-      uses: actions/checkout@v4
-      
+          simg2img img2simg p7zip-full jq tree e2fsprogs cpio debugfs numfmt
+        
     - name: 加载配置
-      id: config
       run: |
         echo "📝 加载配置文件..."
-        [ ! -f "sgsi.json" ] && { echo "::error::未找到sgsi.json配置文件"; exit 1; }
+        [ ! -f "sgsi.json" ] && echo "::error::sgsi.json文件缺失" && exit 1
         
-        # 配置项定义
-        declare -A CONFIG_MAP=(
-          [rom_url]=required
-          [rom_name]=required
-          [pack_sgsi]=optional
-          [make_miui]=required
-          [make_flyme]=required
-          [make_coloros]=required
-          [make_h2os]=required
-          [make_smartisanos]=required
-          [make_zui]=required
-          [make_super]=required
-          [upload_artifact]=required
-          [upload_wetransfer]=required
-        )
+        # 读取所有配置选项
+        ROM_URL=$(jq -r '.rom_url' sgsi.json)
+        ROM_NAME=$(jq -r '.rom_name' sgsi.json)
+        PACK_SGSI=$(jq -r '.pack_sgsi' sgsi.json)
+        MAKE_MIUI=$(jq -r '.make_miui' sgsi.json)
+        MAKE_FLYME=$(jq -r '.make_flyme' sgsi.json)
+        MAKE_COLOROS=$(jq -r '.make_coloros' sgsi.json)
+        MAKE_H2OS=$(jq -r '.make_h2os' sgsi.json)
+        MAKE_SMARTISANOS=$(jq -r '.make_smartisanos' sgsi.json)
+        MAKE_ZUI=$(jq -r '.make_zui' sgsi.json)
+        MAKE_SUPER=$(jq -r '.make_super' sgsi.json)
+        UPLOAD_ARTIFACT=$(jq -r '.upload_artifact' sgsi.json)
+        UPLOAD_WETRANSFER=$(jq -r '.upload_wetransfer' sgsi.json)
         
-        # 解析配置
-        for key in "${!CONFIG_MAP[@]}"; do
-          value=$(jq -r ".$key" sgsi.json)
-          required="${CONFIG_MAP[$key]}"
-          
-          if [ "$value" = "null" ]; then
-            if [ "$required" = "required" ]; then
-              echo "::error::配置项 $key 缺失于sgsi.json"; exit 1
-            else
-              continue
-            fi
-          fi
-          
-          if [ "$key" = "upload_wetransfer" ]; then
-            echo "upload_transfer=$value" >> $GITHUB_ENV
-          else
-            echo "$key=$value" >> $GITHUB_ENV
-          fi
-        done
+        # 设置环境变量
+        echo "ROM_URL=$ROM_URL" >> $GITHUB_ENV
+        echo "ROM_NAME=$ROM_NAME" >> $GITHUB_ENV
+        echo "PACK_SGSI=$PACK_SGSI" >> $GITHUB_ENV
+        echo "MAKE_MIUI=$MAKE_MIUI" >> $GITHUB_ENV
+        echo "MAKE_FLYME=$MAKE_FLYME" >> $GITHUB_ENV
+        echo "MAKE_COLOROS=$MAKE_COLOROS" >> $GITHUB_ENV
+        echo "MAKE_H2OS=$MAKE_H2OS" >> $GITHUB_ENV
+        echo "MAKE_SMARTISANOS=$MAKE_SMARTISANOS" >> $GITHUB_ENV
+        echo "MAKE_ZUI=$MAKE_ZUI" >> $GITHUB_ENV
+        echo "MAKE_SUPER=$MAKE_SUPER" >> $GITHUB_ENV
+        echo "UPLOAD_ARTIFACT=$UPLOAD_ARTIFACT" >> $GITHUB_ENV
+        echo "UPLOAD_WETRANSFER=$UPLOAD_WETRANSFER" >> $GITHUB_ENV
         
-        # 确定输出文件名
-        pack_name=$(jq -r '.pack_sgsi' sgsi.json)
-        if [ -n "$pack_name" ] && [ "$pack_name" != "null" ]; then
-          echo "OUTPUT_FILE=$pack_name" >> $GITHUB_ENV
+        # 设置输出文件名
+        if [ "$PACK_SGSI" != "null" ]; then
+          OUTPUT_FILE="${PACK_SGSI}"
         else
-          rom_name=$(jq -r '.rom_name' sgsi.json)
-          echo "OUTPUT_FILE=XiaoxinSGSI-${rom_name}-$(date +%m%d).7z" >> $GITHUB_ENV
+          OUTPUT_FILE="XiaoxinSGSI-${ROM_NAME}-$(date +%m%d).7z"
         fi
-        echo "✅ 配置加载完成"
-        
+        echo "OUTPUT_FILE=$OUTPUT_FILE" >> $GITHUB_ENV
+
     - name: 获取工具箱
       run: |
         echo "📦 下载工具箱..."
         mkdir -p $BUILD_DIR/SGSI
         
-        echo "🚀 优先使用axel下载..."
-        axel -n 8 -U "SGSI-Builder" --alternate -o SGSI-build-tool.tar "$TOOLKIT_URL" && echo "✅ axel下载成功" || {
-          echo "⚠️ axel下载失败，尝试wget..."
-          wget --progress=bar:force:noscroll -O SGSI-build-tool.tar "$TOOLKIT_URL" && echo "✅ wget下载成功" || {
-            echo "⚠️ wget下载失败，尝试curl..."
-            curl -L -o SGSI-build-tool.tar "$TOOLKIT_URL" && echo "✅ curl下载成功" || {
-              echo "❌ 所有下载方式均失败"; exit 1
-            }
-          }
-        }
+        # 带进度下载
+        curl -# -L "$TOOLKIT_URL" -o toolkit.tar | \
+          while IFS= read -r line; do
+            if [[ $line =~ ([0-9]{1,3})% ]]; then
+              percent="${BASH_REMATCH[1]}"
+              printf "[工具箱]  ▏%3s%% 下载中...\n" "$percent"
+            fi
+          done
         
+        # 解压工具箱
         echo "📂 解压工具箱..."
-        tar -xf SGSI-build-tool.tar
-        [ ! -d "$BUILD_DIR" ] && { echo "::error::工具箱解压失败"; exit 1; }
-        echo "✅ 工具箱准备就绪"
-        
+        tar -xf toolkit.tar
+
     - name: 下载ROM
       run: |
         echo "⬇️ 下载ROM文件..."
         mkdir -p $ROM_DIR
+        cd $ROM_DIR
         
-        echo "🚀 优先使用axel下载..."
-        axel -n 8 -U "SGSI-Builder" --alternate -o "$ROM_DIR/$rom_name" "$rom_url" && echo "✅ axel下载成功" || {
-          echo "⚠️ axel下载失败，尝试wget..."
-          wget --progress=bar:force:noscroll -c -O "$ROM_DIR/$rom_name" "$rom_url" && echo "✅ wget下载成功" || {
-            echo "⚠️ wget下载失败，尝试curl..."
-            curl -C - -L -o "$ROM_DIR/$rom_name" "$rom_url" && echo "✅ curl下载成功" || {
-              echo "❌ 所有下载方式均失败"; exit 1
-            }
-          }
-        }
-        
-        ROM_SIZE=$(du -sh "$ROM_DIR/$rom_name" | awk '{print $1}')
-        echo "✅ ROM下载完成 (大小: $ROM_SIZE)"
-        echo "ROM文件路径: $(pwd)/$ROM_DIR/$rom_name"
-        
-    - name: 处理ColorOS
-      if: env.make_coloros == 'true'
-      run: |
-        echo "🎨 处理ColorOS解密..."
-        cd $BUILD_DIR
-        python3 oppo_ozip/ozipdecrypt.py "../$ROM_DIR/$rom_name" || {
-          echo "::warning::ColorOS解密失败，可能不是加密文件"
-        }
-        echo "✅ ColorOS处理完成"
-        
+        # 带进度下载
+        curl -# -L "$ROM_URL" -o "$ROM_NAME" | \
+          while IFS= read -r line; do
+            if [[ $line =~ ([0-9]{1,3})% ]]; then
+              percent="${BASH_REMATCH[1]}"
+              printf "[ROM]  ▏%3s%% 下载中...\n" "$percent"
+            fi
+          done
+
     - name: 准备系统镜像
       run: |
         echo "🖼️ 准备系统镜像..."
         cd $ROM_DIR
         
-        # 下载 sdat2img 工具
-        echo "📥 下载 sdat2img 工具..."
-        curl -sLO https://raw.githubusercontent.com/xpirt/sdat2img/master/sdat2img.py
-        chmod +x sdat2img.py
-        echo "✅ sdat2img工具准备就绪"
+        # 解压ROM带实时进度
+        echo "[系统] 解压ROM文件..."
+        7z x "$ROM_NAME" -y > unpack.log 2>&1
         
-        # 检查ROM文件是否存在
-        if [ ! -f "$rom_name" ]; then
-          echo "::error::未找到ROM文件: $rom_name"
-          ls -lAh
-          exit 1
-        fi
-        
-        # 高效解压ROM文件（使用7z）
-        echo "解压当前目录的刷机包中......"
-        7z x "$rom_name" -y -bsp1 -bso0 || {
-          echo "::warning::解压失败，尝试强制解压"
-          7z x -t* "$rom_name" -y -oextracted -bsp1 -bso0 || {
-            echo "::error::无法解压ROM文件"
-            exit 1
-          }
-          echo "移动解压文件..."
-          mv extracted/* . >/dev/null 2>&1 || true
-          mv extracted/.* . >/dev/null 2>&1 || true
-          rm -rf extracted
-        }
-        echo "解压完成"
-        
-        # 处理不同格式的system镜像
-        echo "搜索系统镜像..."
-        found_img=false
-        
-        # 搜索可能的镜像文件（扩展搜索范围）
-        system_path=$(find . -type f \( -iname "system.img" -o -iname "system.*img" -o -iname "system.new.dat*" -o -iname "system.ext4.*" -o -iname "system.*.img" \) | head -n1)
-        if [ -n "$system_path" ]; then
-          echo "在子目录中找到系统镜像: $system_path"
-          mv "$system_path" system.img
-          # 尝试移动其他相关文件
-          mv "$(dirname "$system_path")"/system.* . >/dev/null 2>&1 || true
-          found_img=true
-          echo "✅ 从子目录找到system.img"
-        fi
-        
-        # 情况1：直接存在system.img
-        if [ "$found_img" = false ] && [ -f "system.img" ]; then
-          echo "🔍 找到system.img"
-          found_img=true
-        fi
-        
-        # 情况2：存在压缩的dat文件
-        if [ "$found_img" = false ] && [ -f "system.new.dat.br" ]; then
-          echo "🧪 解压brotli格式..."
-          brotli -d -v system.new.dat.br
-          rm -f system.new.dat.br
-          found_img=true
-        fi
-        
-        if [ "$found_img" = false ] && [ -f "system.new.dat.xz" ]; then
-          echo "🧪 解压xz格式..."
-          xz -d -v system.new.dat.xz
-          found_img=true
-        fi
-        
-        # 处理.dat文件转换
-        if [ "$found_img" = true ] && [ -f "system.new.dat" ] && [ -f "system.transfer.list" ]; then
-          echo "🔧 转换dat到img..."
-          python3 sdat2img.py system.transfer.list system.new.dat system.img
-          if [ -f "system.img" ]; then
-            rm -f system.new.dat system.transfer.list
-            echo "✅ 成功生成system.img"
-          else
-            echo "::warning::dat转换失败"
-            found_img=false
-          fi
-        fi
-        
-        # 情况4：存在super.img
-        if [ "$found_img" = false ] && [ -f "super.img" ]; then
-          echo "🔍 找到super.img，提取system分区..."
-          simg2img super.img super_raw.img
-          lpunpack super_raw.img
-          if [ -f "system_a.img" ]; then
-            mv system_a.img system.img
-            found_img=true
-          else
-            echo "::warning::解包super.img后未找到system分区"
-          fi
-        fi
-        
-        # 检查system文件夹
-        if [ "$found_img" = false ] && [ -d "system" ]; then
-          echo "🔍 找到system目录，尝试创建镜像..."
-          echo "使用cpio创建system.img..."
-          (cd system; find . | cpio -o -H newc | gzip -9) > system.img
-          if [ -s "system.img" ]; then
-            found_img=true
-          else
-            echo "::warning::从system目录创建的镜像为空"
-          fi
+        # 处理不同格式
+        if [ -f "system.new.dat" ]; then
+          echo "[系统] 转换dat格式..."
+          curl -sLO https://raw.githubusercontent.com/xpirt/sdat2img/master/sdat2img.py
+          python3 sdat2img.py system.transfer.list system.new.dat system.img > convert.log 2>&1
+        elif [ -f "super.img" ]; then
+          echo "[系统] 解包super分区..."
+          simg2img super.img super_raw.img >> unpack.log 2>&1
+          lpunpack super_raw.img >> unpack.log 2>&1
         fi
         
         # 最终检查
-        if [ "$found_img" = true ] && [ -f "system.img" ] && [ -s "system.img" ]; then
-          SYSTEM_SIZE=$(du -sh system.img | awk '{print $1}')
-          echo "✅ 系统镜像准备完成 (大小: $SYSTEM_SIZE)"
-          
-          # 如果是稀疏镜像，转换为原始格式
-          if file system.img | grep -q "sparse"; then
-            echo "🔧 转换稀疏镜像为原始格式..."
-            simg2img system.img system_raw.img
-            mv system_raw.img system.img
-          fi
-        else
+        if [ ! -f "system.img" ]; then
           echo "::error::未找到有效的system.img"
-          echo "当前目录内容:"
-          ls -lAh .
-          echo "子目录内容:"
-          find . -type d -exec sh -c 'echo "\n{}:"; ls -lAh "{}"' \;
+          echo "=== 解压日志最后20行 ==="
+          tail -n 20 unpack.log
+          [ -f "convert.log" ] && echo "=== 转换日志最后20行 ===" && tail -n 20 convert.log
           exit 1
         fi
-        
+
     - name: 提取版本信息
       run: |
         echo "📊 提取版本信息..."
         cd $ROM_DIR
         
-        # 尝试挂载系统镜像
-        mkdir -p system_mount
-        sudo mount -t ext4 -o ro,noload,loop system.img system_mount 2>/dev/null || {
-          # 如果挂载失败，尝试修复镜像
-          echo "::warning::挂载失败，尝试修复镜像..."
-          e2fsck -yf system.img || true
-          resize2fs -M system.img || true
-          sudo mount -t ext4 -o ro,noload,loop system.img system_mount || true
-        }
+        # 尝试提取build.prop
+        debugfs -R "cat /system/build.prop" system.img > build.prop 2>/dev/null || true
         
-        # 查找build.prop文件
-        BUILD_PROPS=""
-        paths=(
-          "system_mount/system/build.prop"
-          "system_mount/build.prop"
-          "system_mount/system/system/build.prop"
-          "system_mount/vendor/build.prop"
-          "system_mount/system/vendor/build.prop"
-        )
+        if [ ! -s "build.prop" ]; then
+          7z x system.img -oextracted >/dev/null 2>&1
+          find extracted -name build.prop ! -empty -exec cat {} + > build.prop
+        fi
         
-        for path in "${paths[@]}"; do
-          if [ -f "$path" ]; then
-            BUILD_PROPS="$path"
-            break
-          fi
-        done
-        
-        # 提取版本信息
-        if [ -n "$BUILD_PROPS" ]; then
-          echo "找到build.prop: $BUILD_PROPS"
-          ROM_VERSION=$(grep -m1 "ro.build.version.incremental" "$BUILD_PROPS" | cut -d'=' -f2 || true)
-          ANDROID_VERSION=$(grep -m1 "ro.build.version.release" "$BUILD_PROPS" | cut -d'=' -f2 || true)
-          SECURITY_PATCH=$(grep -m1 "ro.build.version.security_patch" "$BUILD_PROPS" | cut -d'=' -f2 || true)
-          echo "rom_version=${ROM_VERSION:-未知}" >> $GITHUB_ENV
-          echo "android_version=${ANDROID_VERSION:-未知}" >> $GITHUB_ENV
-          echo "security_patch=${SECURITY_PATCH:-未知}" >> $GITHUB_ENV
+        if [ -s "build.prop" ]; then
+          ROM_VERSION=$(grep "ro.build.version.incremental" build.prop | cut -d= -f2)
+          ANDROID_VERSION=$(grep "ro.build.version.release" build.prop | cut -d= -f2)
+          
+          echo "ROM版本: ${ROM_VERSION:-未知}"
+          echo "Android版本: ${ANDROID_VERSION:-未知}"
+          echo "ANDROID_VERSION=$ANDROID_VERSION" >> $GITHUB_ENV
         else
           echo "::warning::未找到build.prop文件"
         fi
-        
-        # 清理挂载点
-        sudo umount system_mount 2>/dev/null || true
-        rm -rf system_mount
-        echo "✅ 版本信息提取完成"
-        
+
     - name: 配置构建选项
       run: |
         echo "⚙️ 配置构建选项..."
         cd $BUILD_DIR
         
-        # 跳过权限更改操作
+        # 跳过权限更改
         sed -i 's/chown -R root:root/# chown -R root:root/g' make.sh
         sed -i 's/chmod -R 777/# chmod -R 777/g' make.sh
-        echo "🛡️ 跳过权限修改操作"
         
-        # 避免卡退：禁用可能需要交互的部分
+        # 禁用交互
         sed -i 's/read pause/# read pause/g' make.sh
-        sed -i 's/^pause$/echo "跳过暂停"/g' make.sh
-        echo "⏭️ 禁用交互式暂停"
         
         # 配置super模式
-        if [ "$make_super" = 'true' ]; then
+        if [ "$MAKE_SUPER" = 'true' ]; then
           sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
           echo "🔄 启用super分区模式"
         fi
         
-        # 应用品牌特定修复
-        BRANDS=("MIUI" "Flyme" "ColorOS" "H2OS" "SmartisanOS" "ZUI")
-        KEYS=("make_miui" "make_flyme" "make_coloros" "make_h2os" "make_smartisanos" "make_zui")
-        brand_found=false
-        
-        for i in "${!BRANDS[@]}"; do
-          key="${KEYS[$i]}"
-          brand="${BRANDS[$i]}"
-          
-          # 使用间接引用获取环境变量值
-          key_value=$(eval echo \$$key)
-          
-          if [ "$key_value" = 'true' ] && [ -f "../fix/${brand}.sh" ]; then
-            cp -f "../fix/${brand}.sh" fixbug/fixbug.sh
-            echo "brand=$brand" >> $GITHUB_ENV
-            brand_found=true
-            echo "🔧 应用${brand}修复"
-            break
-          fi
-        done
-        
-        # 仅在找到品牌修复时才启用修复脚本
-        if [ "$brand_found" = false ]; then
-          echo "brand=通用" >> $GITHUB_ENV
-          echo "ℹ️ 未指定特定品牌，跳过修复脚本"
-          
-          # 创建空修复脚本，但禁用其执行
-          echo "#!/bin/bash" > fixbug/fixbug.sh
-          echo "echo '通用品牌，无需特殊修复'" >> fixbug/fixbug.sh
-          chmod +x fixbug/fixbug.sh
-          
-          # 在构建脚本中注释掉修复步骤
-          sed -i 's/\. \$bin\/fixbug\.sh/# 通用品牌，跳过修复/g' make.sh
-          sed -i 's/\. \$bin\/fixbug\.sh/# 通用品牌，跳过修复/g' dynamic_SGSI.sh 2>/dev/null || true
+        # 配置MIUI构建
+        if [ "$MAKE_MIUI" = 'true' ]; then
+          sed -i 's/SGSI.sh/make_miui.sh/g' make.sh
+          echo "🔄 启用MIUI构建模式"
         fi
         
-        echo "✅ 构建配置完成"
+        # 配置Flyme构建
+        if [ "$MAKE_FLYME" = 'true' ]; then
+          sed -i 's/SGSI.sh/make_flyme.sh/g' make.sh
+          echo "🔄 启用Flyme构建模式"
+        fi
         
+        # 配置ColorOS构建
+        if [ "$MAKE_COLOROS" = 'true' ]; then
+          sed -i 's/SGSI.sh/make_coloros.sh/g' make.sh
+          echo "🔄 启用ColorOS构建模式"
+        fi
+        
+        # 配置H2OS构建
+        if [ "$MAKE_H2OS" = 'true' ]; then
+          sed -i 's/SGSI.sh/make_h2os.sh/g' make.sh
+          echo "🔄 启用H2OS构建模式"
+        fi
+        
+        # 配置SmartisanOS构建
+        if [ "$MAKE_SMARTISANOS" = 'true' ]; then
+          sed -i 's/SGSI.sh/make_smartisan.sh/g' make.sh
+          echo "🔄 启用SmartisanOS构建模式"
+        fi
+        
+        # 配置ZUI构建
+        if [ "$MAKE_ZUI" = 'true' ]; then
+          sed -i 's/SGSI.sh/make_zui.sh/g' make.sh
+          echo "🔄 启用ZUI构建模式"
+        fi
+
     - name: 执行构建
       run: |
         echo "🏗️ 开始构建SGSI..."
         cd $BUILD_DIR
         
-        # 添加执行权限
-        find . -type f -name "*.sh" -exec chmod +x {} \;
-        
-        # 使用nohup防止卡退
-        echo "启动构建进程..."
-        nohup bash -c "time bash make.sh" > build.log 2>&1 &
-        BUILD_PID=$!
-        
-        # 监控构建进程
-        echo "监控构建进程 (PID: $BUILD_PID)..."
-        while ps -p $BUILD_PID > /dev/null; do
-          echo "构建运行中..."
-          tail -n 10 build.log || true
-          sleep 60
+        # 带进度监控的构建
+        bash make.sh 2>&1 | tee build.log | while IFS= read -r line; do
+          # 关键错误标记
+          if echo "$line" | grep -qi "error\|fail\|cannot"; then
+            echo "::error::❌ $line"
+          # 进度显示
+          elif [[ "$line" =~ ([0-9]{1,3})% ]]; then
+            percent="${BASH_REMATCH[1]}"
+            echo "▏${percent}% 处理中..."
+          # 重要里程碑
+          elif echo "$line" | grep -qiE 'complete|done|success'; then
+            echo "✅ $line"
+          fi
         done
         
-        # 检查构建结果
-        wait $BUILD_PID
-        BUILD_EXIT=$?
-        
-        if [ $BUILD_EXIT -ne 0 ]; then
-          echo "::error::构建失败，退出代码: $BUILD_EXIT"
-          echo "构建日志:"
-          cat build.log || true
-          exit 1
-        fi
-        
-        if [ ! -d "out" ]; then
+        # 检查结果
+        if [ ! -d "out" ] && [ ! -d "SGSI" ]; then
           echo "::error::构建失败，未找到输出目录"
-          echo "构建日志:"
-          cat build.log || true
+          echo "=== 构建日志最后20行 ==="
+          tail -n 20 build.log
           exit 1
         fi
-        echo "✅ SGSI构建完成"
-        
+
     - name: 打包成果
       run: |
         echo "📦 打包成果物..."
         cd $BUILD_DIR
         
-        # 创建版本信息文件
-        echo "构建信息:" > version-info.txt
-        echo "设备: $rom_name" >> version-info.txt
-        echo "品牌: ${brand:-通用}" >> version-info.txt
-        echo "Android版本: ${android_version:-未知}" >> version-info.txt
-        echo "安全补丁: ${security_patch:-未知}" >> version-info.txt
-        echo "构建日期: $(date +"%Y-%m-%d %H:%M:%S %Z")" >> version-info.txt
+        # 带进度压缩
+        7za a -t7z -mx=9 "$OUTPUT_FILE" SGSI/* out/* > package.log 2>&1
         
-        # 创建压缩包（使用最高压缩级别）
-        7za a -t7z -mx=9 -mmt=4 "$OUTPUT_FILE" SGSI/* version-info.txt
-        if [ ! -f "$OUTPUT_FILE" ]; then
+        if [ -f "$OUTPUT_FILE" ]; then
+          OUTPUT_SIZE=$(numfmt --to=iec-i --suffix=B $(stat -c %s "$OUTPUT_FILE") | sed 's/ /_/g')
+          echo "✅ 打包完成 | 大小: $OUTPUT_SIZE"
+        else
           echo "::error::打包失败"
-          echo "SGSI目录内容:"
-          ls -lAh SGSI/
+          echo "=== 打包日志最后20行 ==="
+          tail -n 20 package.log
           exit 1
         fi
+
+    - name: 上传制品
+      run: |
+        echo "⬆️ 上传制品..."
+        cd $BUILD_DIR
         
-        OUTPUT_SIZE=$(du -sh "$OUTPUT_FILE" | awk '{print $1}')
-        echo "✅ 打包完成 (大小: $OUTPUT_SIZE)"
-        
-    - name: 上传到WeTransfer
-      if: env.upload_transfer == 'true'
+        # 准备上传
+        if [ "$UPLOAD_ARTIFACT" = 'true' ]; then
+          # 使用配置中指定的打包名称
+          FINAL_FILE="$OUTPUT_FILE"
+          
+          # 创建版本信息
+          echo "设备: $ROM_NAME" > version-info.txt
+          echo "Android版本: ${ANDROID_VERSION:-未知}" >> version-info.txt
+          echo "构建日期: $(date +"%Y-%m-%d")" >> version-info.txt
+          
+          echo "制品 $FINAL_FILE 已准备上传"
+        fi
+
+    - name: 上传日志
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: |
+          ${{ env.ROM_DIR }}/unpack.log
+          ${{ env.ROM_DIR }}/convert.log
+          ${{ env.ROM_DIR }}/build.prop
+          ${{ env.BUILD_DIR }}/build.log
+          ${{ env.BUILD_DIR }}/package.log
+
+    - name: 上传WeTransfer
+      if: env.UPLOAD_WETRANSFER == 'true'
       run: |
         echo "☁️ 上传到WeTransfer..."
         cd $BUILD_DIR
+        
+        # 下载传输工具
         curl -sL https://git.io/file-transfer | sh
-        ./transfer wet "$OUTPUT_FILE" | tee transfer.log
-        DOWNLOAD_URL=$(grep -oP 'Download Link: \K.*' transfer.log)
         
-        if [ -n "$DOWNLOAD_URL" ]; then
-          echo "## SGSI下载" >> $GITHUB_STEP_SUMMARY
-          echo "**文件**: $OUTPUT_FILE" >> $GITHUB_STEP_SUMMARY
-          echo "**大小**: $OUTPUT_SIZE" >> $GITHUB_STEP_SUMMARY
-          echo "**下载**: [WeTransfer]($DOWNLOAD_URL)" >> $GITHUB_STEP_SUMMARY
-          echo "✅ 上传成功"
-        else
-          echo "::error::WeTransfer上传失败"
-          cat transfer.log
-        fi
-        
-    - name: 上传制品
-      if: env.upload_artifact == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: XiaoxinSGSI
-        path: ${{ env.BUILD_DIR }}/${{ env.OUTPUT_FILE }}
-        
-    - name: 最终清理
+        # 带进度上传
+        ./transfer wet "$OUTPUT_FILE" | while IFS= read -r line; do
+          if [[ "$line" =~ ([0-9]{1,3})% ]]; then
+            percent="${BASH_REMATCH[1]}"
+            printf "[上传] ▏%3s%% 上传中...\n" "$percent"
+          elif [[ "$line" =~ 'Download Link' ]]; then
+            DOWNLOAD_LINK=$(echo "$line" | cut -d: -f2- | xargs)
+            echo "## WeTransfer下载地址" >> $GITHUB_STEP_SUMMARY
+            echo "$DOWNLOAD_LINK" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
+
+    - name: 清理工作区
       run: |
         echo "🧹 最终清理..."
-        rm -rf $ROM_DIR/* $BUILD_DIR/SGSI
+        rm -rf $ROM_DIR $BUILD_DIR/SGSI $BUILD_DIR/out
         df -h
-        echo "✅ 清理完成"
+        echo "✅ 构建流程完成"
