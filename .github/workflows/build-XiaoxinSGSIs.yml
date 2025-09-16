@@ -129,7 +129,7 @@ jobs:
           exit 1
         fi
         
-        echo "下载完成，大小: $((file_size/1024/1024))MB"
+        echo "下载完成，大小: $((file_size/1024/1024))MB")
     
     - name: 处理ROM类型
       if: ${{ env.rom_type != 'none' }}
@@ -211,7 +211,6 @@ jobs:
         mv SGSI/* ../final_out/ || true
         mv out/*.img ../final_out/ || true
         
-        # 记录原始大小
         if [ -f "../final_out/system.img" ]; then
           orig_size=$(du -h "../final_out/system.img" | cut -f1)
           echo "原始大小: $orig_size" >> ../final_out/build_info.txt
@@ -239,22 +238,18 @@ jobs:
           echo "开始压缩system.img..."
           original_size=$(du -h system.img | cut -f1)
           
-          # 安装pigz（多线程压缩工具）
           if ! command -v pigz &>/dev/null; then
             echo "安装pigz以获得更快压缩速度..."
             sudo apt-get update
             sudo apt-get install -y pigz
           fi
           
-          # 压缩镜像
           echo "使用pigz进行多线程压缩..."
           pigz -k -f -9 system.img
           
-          # 记录压缩后大小
           compressed_size=$(du -h system.img.gz | cut -f1)
           echo "压缩后大小: $compressed_size" >> build_info.txt
           
-          # 计算压缩率
           orig_bytes=$(du -b system.img | cut -f1)
           comp_bytes=$(du -b system.img.gz | cut -f1)
           ratio=$(echo "scale=2; (1 - $comp_bytes/$orig_bytes) * 100" | bc)
@@ -277,7 +272,6 @@ jobs:
         
         pack_name="${{ env.pack_sgsi }}"
         
-        # 显示压缩信息
         if [ -f "build_info.txt" ]; then
           echo "::group::📦 镜像压缩信息"
           cat build_info.txt
@@ -292,10 +286,8 @@ jobs:
           fi
         fi
         
-        # 创建压缩包
         zip -r -0 "../$pack_name" .
         
-        # 分割大文件
         cd ..
         file_size=$(stat -c%s "$pack_name")
         max_size=1400000000
@@ -317,7 +309,7 @@ jobs:
         generate_release_notes: true
         body: |
           构建 #${{ github.run_number }} 已完成！
-          ${{ contains(steps.create-release.outputs.body, '压缩结果') && format('镜像大小: {0}', steps.create-release.outputs.body.match(/压缩结果: (.+)/)[1]) }}
+          查看构建日志获取镜像压缩详情
     
     - name: 上传构建产物
       if: ${{ env.upload_artifact == 'true' }}
@@ -353,7 +345,6 @@ jobs:
         
         echo "::endgroup::"
         
-        # 在日志末尾显示大小对比
         if [ -f "SGSI-build-tool/final_out/build_info.txt" ]; then
           orig_size=$(grep "原始大小" SGSI-build-tool/final_out/build_info.txt | cut -d: -f2 | xargs)
           comp_size=$(grep "压缩后大小" SGSI-build-tool/final_out/build_info.txt | cut -d: -f2 | xargs)
