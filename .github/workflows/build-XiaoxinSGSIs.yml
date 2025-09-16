@@ -32,7 +32,26 @@ jobs:
           echo "请在仓库根目录创建sgsi.json文件并填写配置"
           exit 1
         fi
+        echo "✅ 配置文件存在"
+    
+    - name: 安装依赖工具
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq pigz
         
+        if ! command -v jq &> /dev/null; then
+          echo "::error::❌ jq 未安装成功"
+          exit 1
+        fi
+        echo "✅ jq 版本: $(jq --version)"
+        
+        if ! command -v pigz &> /dev/null; then
+          echo "::warning::⚠️ pigz 未安装，将使用gzip进行压缩"
+        fi
+    
+    - name: 读取配置文件
+      id: config
+      run: |
         # 验证JSON格式
         if ! jq empty sgsi.json; then
           echo "::error::❌ sgsi.json 格式无效"
@@ -40,42 +59,24 @@ jobs:
           exit 1
         fi
         
-        # 创建配置文件备份
-        cp sgsi.json config_backup.json
-        echo "✅ 配置文件验证通过"
-    
-    - name: 安装依赖工具
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y jq
+        # 读取所有配置字段
+        rom_url=$(jq -r '.rom_url' sgsi.json)
+        rom_name=$(jq -r '.rom_name' sgsi.json)
+        pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
+        upload_artifact=$(jq -r '.upload_artifact' sgsi.json)
+        upload_wetransfer=$(jq -r '.upload_wetransfer' sgsi.json)
+        make_miui=$(jq -r '.make_miui' sgsi.json)
+        make_flyme=$(jq -r '.make_flyme' sgsi.json)
+        make_coloros=$(jq -r '.make_coloros' sgsi.json)
+        make_h2os=$(jq -r '.make_h2os' sgsi.json)
+        make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)
+        make_zui=$(jq -r '.make_zui' sgsi.json)
+        make_super=$(jq -r '.make_super' sgsi.json)
         
-        # 验证jq安装
-        if ! command -v jq &> /dev/null; then
-          echo "::error::❌ jq 未安装成功"
-          exit 1
-        fi
-        echo "✅ jq 版本: $(jq --version)"
-    
-    - name: 读取配置文件
-      id: config
-      run: |
-        # 确保备份文件存在
-        if [ ! -f "config_backup.json" ]; then
-          echo "::error::❌ 配置文件备份不存在"
-          echo "请检查上一步是否成功创建 config_backup.json"
-          exit 1
-        fi
-        
-        # 读取关键字段
-        rom_url=$(jq -r '.rom_url' config_backup.json)
-        rom_name=$(jq -r '.rom_name' config_backup.json)
-        pack_sgsi=$(jq -r '.pack_sgsi' config_backup.json)
-        upload_artifact=$(jq -r '.upload_artifact' config_backup.json)
-        upload_wetransfer=$(jq -r '.upload_wetransfer' config_backup.json)
-        
-        # 设置默认值
+        # 设置默认值（处理null值）
         [ "$upload_artifact" == "null" ] && upload_artifact=true
         [ "$upload_wetransfer" == "null" ] && upload_wetransfer=false
+        [ "$make_super" == "null" ] && make_super=false
         
         # 检查必需字段
         if [ -z "$rom_url" ] || [ "$rom_url" == "null" ]; then
@@ -90,14 +91,16 @@ jobs:
           echo "ℹ️ 从URL提取ROM文件名: $rom_name"
         fi
         
-        # 处理ROM类型
+        # ROM类型检查
         rom_types=(miui flyme coloros h2os smartisanos zui)
         type_count=0
         current_type=""
         
         echo "🔍 检查ROM类型配置:"
         for type in "${rom_types[@]}"; do
-          value=$(jq -r ".make_$type" config_backup.json 2>/dev/null || echo "false")
+          # 使用动态变量名
+          value_name="make_${type}"
+          value=${!value_name}
           
           # 处理null值
           [ "$value" == "null" ] && value="false"
@@ -105,7 +108,7 @@ jobs:
           echo "  make_$type = $value"
           
           if [ "$value" == "true" ]; then
-            ((type_count++))
+            type_count=$((type_count + 1))
             current_type=$type
           fi
         done
@@ -120,9 +123,25 @@ jobs:
         echo "rom_url=$rom_url" >> $GITHUB_ENV
         echo "rom_name=$rom_name" >> $GITHUB_ENV
         echo "pack_sgsi=$pack_sgsi" >> $GITHUB_ENV
-        echo "rom_type=${current_type:-none}" >> $GITHUB_ENV
         echo "upload_artifact=$upload_artifact" >> $GITHUB_ENV
         echo "upload_wetransfer=$upload_wetransfer" >> $GITHUB_ENV
+        echo "make_miui=$make_miui" >> $GITHUB_ENV
+        echo "make_flyme=$make_flyme" >> $GITHUB_ENV
+        echo "make_coloros=$make_coloros" >> $GITHUB_ENV
+        echo "make_h2os=$make_h2os" >> $GITHUB_ENV
+        echo "make_smartisanos=$make_smartisanos" >> $GITHUB_ENV
+        echo "make_zui=$make_zui" >> $GITHUB_ENV
+        echo "make_super=$make_super" >> $GITHUB_ENV
+        echo "rom_type=$current_type" >> $GITHUB_ENV
+        
+        # 显示读取的配置摘要
+        echo "✅ 配置读取成功:"
+        echo "  ROM URL: $rom_url"
+        echo "  ROM名称: $rom_name"
+        echo "  ROM类型: ${current_type:-无}"
+        echo "  打包名称: $pack_sgsi"
+        echo "  Artifact上传: $upload_artifact"
+        echo "  WeTransfer上传: $upload_wetransfer"
         
         # 复制修复脚本
         if [ -n "$current_type" ]; then
@@ -141,24 +160,16 @@ jobs:
           
           if [ -n "$script_path" ]; then
             cp "$script_path" tmp_fix/fixbug.sh
+            chmod +x tmp_fix/fixbug.sh
             echo "✅ 使用修复脚本: $script_path"
           else
-            echo "::warning::⚠️ 未找到 ${current_type} 修复脚本"
+            echo "::warning::⚠️ 未找到 ${current_type} 修复脚本，将使用默认构建流程"
             # 创建空修复脚本防止后续步骤失败
             touch tmp_fix/fixbug.sh
           fi
         else
           echo "ℹ️ 未启用ROM类型，跳过修复脚本复制"
         fi
-        
-        # 显示读取的配置摘要
-        echo "✅ 配置读取成功:"
-        echo "  ROM URL: $rom_url"
-        echo "  ROM名称: $rom_name"
-        echo "  ROM类型: ${current_type:-无}"
-        echo "  打包名称: $pack_sgsi"
-        echo "  Artifact上传: $upload_artifact"
-        echo "  WeTransfer上传: $upload_wetransfer"
     
     - name: 下载构建工具
       timeout-minutes: 5
@@ -240,6 +251,13 @@ jobs:
       run: |
         cd SGSI-build-tool/10
         
+        # 复制修复脚本
+        if [ -f "../../tmp_fix/fixbug.sh" ]; then
+          cp -f ../../tmp_fix/fixbug.sh fixbug/fixbug.sh
+          chmod +x fixbug/fixbug.sh
+          echo "🛠️ 已应用 ${{ env.rom_type }} 修复脚本"
+        fi
+        
         case "${{ env.rom_type }}" in
           coloros)
             echo "🔓 解密ColorOS ROM..."
@@ -259,16 +277,8 @@ jobs:
             ;;
         esac
         
-        # 应用修复脚本
-        if [ -f "fixbug/fixbug.sh" ]; then
-          chmod +x fixbug/fixbug.sh
-          echo "🛠️ 已应用 ${{ env.rom_type }} 修复脚本"
-        elif [ -n "${{ env.rom_type }}" ]; then
-          echo "::warning::⚠️ 未找到 ${{ env.rom_type }} 修复脚本"
-        fi
-        
         # 处理Super分区支持
-        if [ "$(jq -r '.make_super' ../sgsi.json)" == "true" ]; then
+        if [ "${{ env.make_super }}" == "true" ]; then
           sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
           echo "🛠️ 启用Super分区支持"
         fi
@@ -363,14 +373,13 @@ jobs:
           echo "📦 开始压缩system.img..."
           original_size=$(du -h system.img | cut -f1)
           
-          if ! command -v pigz &>/dev/null; then
-            echo "🛠️ 安装pigz以获得更快压缩速度..."
-            sudo apt-get update -qq
-            sudo apt-get install -y pigz
+          if command -v pigz &> /dev/null; then
+            echo "⚙️ 使用pigz进行多线程压缩..."
+            pigz -k -f -9 system.img
+          else
+            echo "⚙️ 使用gzip进行压缩..."
+            gzip -k -f -9 system.img
           fi
-          
-          echo "⚙️ 使用pigz进行多线程压缩..."
-          pigz -k -f -9 system.img
           
           compressed_size=$(du -h system.img.gz | cut -f1)
           echo "压缩后大小: $compressed_size" >> build_info.txt
@@ -476,13 +485,13 @@ jobs:
           exit 1
         fi
         
-        # 下载文件传输工具
-        echo "🛠️ 安装 file-transfer 工具..."
-        curl -sL https://git.io/file-transfer | sh
-        
         # 获取文件大小信息
         FILE_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
         echo "⬆️ 开始上传文件: $(basename "$OUTPUT_FILE") (大小: $FILE_SIZE)..."
+        
+        # 下载文件传输工具
+        echo "🛠️ 安装 file-transfer 工具..."
+        curl -sL https://git.io/file-transfer | sh
         
         # 计算到期日期
         EXPIRY_DATE=$(date -d "+7 days" "+%Y-%m-%d")
@@ -501,11 +510,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "文件: $(basename "$OUTPUT_FILE")" >> $GITHUB_STEP_SUMMARY
           echo "大小: $FILE_SIZE" >> $GITHUB_STEP_SUMMARY
-          
-          # 添加到控制台输出
-          echo "✅ WeTransfer上传成功！"
-          echo "📥 下载链接: $DOWNLOAD_LINK"
-          echo "⏳ 链接有效期至: ${EXPIRY_DATE}"
           
           # 设置环境变量供后续步骤使用
           echo "DOWNLOAD_LINK=$DOWNLOAD_LINK" >> $GITHUB_ENV
