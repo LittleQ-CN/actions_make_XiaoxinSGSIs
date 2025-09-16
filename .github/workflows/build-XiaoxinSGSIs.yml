@@ -41,7 +41,7 @@ jobs:
         echo "📝 加载配置文件..."
         [ ! -f "sgsi.json" ] && { echo "::error::未找到sgsi.json配置文件"; exit 1; }
         
-        # 修正配置项拼写错误
+        # 配置项定义
         declare -A CONFIG_MAP=(
           [rom_url]=required
           [rom_name]=required
@@ -54,7 +54,7 @@ jobs:
           [make_zui]=required
           [make_super]=required
           [upload_artifact]=required
-          [upload_wetransfer]=required  # 修正拼写错误
+          [upload_wetransfer]=required
         )
         
         # 解析配置
@@ -164,7 +164,6 @@ jobs:
             echo "::error::无法解压ROM文件"
             exit 1
           }
-          # 查找解压后的内容
           echo "移动解压文件..."
           mv extracted/* . >/dev/null 2>&1 || true
           mv extracted/.* . >/dev/null 2>&1 || true
@@ -176,66 +175,77 @@ jobs:
         echo "搜索系统镜像..."
         found_img=false
         
+        # 搜索可能的镜像文件（扩展搜索范围）
+        system_path=$(find . -type f \( -iname "system.img" -o -iname "system.*img" -o -iname "system.new.dat*" -o -iname "system.ext4.*" -o -iname "system.*.img" \) | head -n1)
+        if [ -n "$system_path" ]; then
+          echo "在子目录中找到系统镜像: $system_path"
+          mv "$system_path" system.img
+          # 尝试移动其他相关文件
+          mv "$(dirname "$system_path")"/system.* . >/dev/null 2>&1 || true
+          found_img=true
+          echo "✅ 从子目录找到system.img"
+        fi
+        
         # 情况1：直接存在system.img
-        if [ -f "system.img" ]; then
+        if [ "$found_img" = false ] && [ -f "system.img" ]; then
           echo "🔍 找到system.img"
           found_img=true
+        fi
         
         # 情况2：存在压缩的dat文件
-        elif [ -f "system.new.dat.br" ]; then
+        if [ "$found_img" = false ] && [ -f "system.new.dat.br" ]; then
           echo "🧪 解压brotli格式..."
           brotli -d -v system.new.dat.br
           rm -f system.new.dat.br
           found_img=true
-          
-        elif [ -f "system.new.dat.xz" ]; then
+        fi
+        
+        if [ "$found_img" = false ] && [ -f "system.new.dat.xz" ]; then
           echo "🧪 解压xz格式..."
           xz -d -v system.new.dat.xz
           found_img=true
+        fi
         
-        # 情况3：需要转换dat文件
-        elif [ -f "system.new.dat" ] && [ -f "system.transfer.list" ]; then
+        # 处理.dat文件转换
+        if [ "$found_img" = true ] && [ -f "system.new.dat" ] && [ -f "system.transfer.list" ]; then
           echo "🔧 转换dat到img..."
           python3 sdat2img.py system.transfer.list system.new.dat system.img
-          rm -f system.new.dat system.transfer.list
-          found_img=true
+          if [ -f "system.img" ]; then
+            rm -f system.new.dat system.transfer.list
+            echo "✅ 成功生成system.img"
+          else
+            echo "::warning::dat转换失败"
+            found_img=false
+          fi
+        fi
         
         # 情况4：存在super.img
-        elif [ -f "super.img" ]; then
+        if [ "$found_img" = false ] && [ -f "super.img" ]; then
           echo "🔍 找到super.img，提取system分区..."
           simg2img super.img super_raw.img
           lpunpack super_raw.img
-          mv system_a.img system.img
-          found_img=true
+          if [ -f "system_a.img" ]; then
+            mv system_a.img system.img
+            found_img=true
+          else
+            echo "::warning::解包super.img后未找到system分区"
+          fi
         fi
         
-        # 如果仍未找到，尝试深度搜索
-        if [ "$found_img" = false ]; then
-          echo "深度搜索system镜像..."
-          
-          # 搜索system.img
-          system_path=$(find . -type f \( -name "system.img" -o -name "system.*img" \) | head -n1)
-          
-          if [ -n "$system_path" ]; then
-            echo "在子目录中找到system镜像: $system_path"
-            mv "$system_path" system.img
+        # 检查system文件夹
+        if [ "$found_img" = false ] && [ -d "system" ]; then
+          echo "🔍 找到system目录，尝试创建镜像..."
+          echo "使用cpio创建system.img..."
+          (cd system; find . | cpio -o -H newc | gzip -9) > system.img
+          if [ -s "system.img" ]; then
             found_img=true
-            
-            # 尝试移动其他相关文件
-            mv "$(dirname "$system_path")"/system.* . >/dev/null 2>&1 || true
-          fi
-          
-          # 检查system文件夹
-          if [ -d "system" ]; then
-            echo "🔍 找到system目录，尝试创建镜像..."
-            echo "使用cpio创建system.img..."
-            (cd system; find . | cpio -o -H newc | gzip -9) > system.img
-            found_img=true
+          else
+            echo "::warning::从system目录创建的镜像为空"
           fi
         fi
         
         # 最终检查
-        if [ "$found_img" = true ] && [ -f "system.img" ]; then
+        if [ "$found_img" = true ] && [ -f "system.img" ] && [ -s "system.img" ]; then
           SYSTEM_SIZE=$(du -sh system.img | awk '{print $1}')
           echo "✅ 系统镜像准备完成 (大小: $SYSTEM_SIZE)"
           
@@ -248,7 +258,9 @@ jobs:
         else
           echo "::error::未找到有效的system.img"
           echo "当前目录内容:"
-          ls -lAhR
+          ls -lAh .
+          echo "子目录内容:"
+          find . -type d -exec sh -c 'echo "\n{}:"; ls -lAh "{}"' \;
           exit 1
         fi
         
