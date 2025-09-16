@@ -17,7 +17,7 @@ jobs:
         df -h
         
     - name: 检出代码库
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: 读取配置文件
       id: config
@@ -129,7 +129,7 @@ jobs:
           exit 1
         fi
         
-        echo "下载完成，大小: $((file_size/1024/1024))MB")
+        echo "下载完成，大小: $((file_size/1024/1024))MB"
     
     - name: 处理ROM类型
       if: ${{ env.rom_type != 'none' }}
@@ -240,7 +240,7 @@ jobs:
           
           if ! command -v pigz &>/dev/null; then
             echo "安装pigz以获得更快压缩速度..."
-            sudo apt-get update
+            sudo apt-get update -qq
             sudo apt-get install -y pigz
           fi
           
@@ -250,8 +250,8 @@ jobs:
           compressed_size=$(du -h system.img.gz | cut -f1)
           echo "压缩后大小: $compressed_size" >> build_info.txt
           
-          orig_bytes=$(du -b system.img | cut -f1)
-          comp_bytes=$(du -b system.img.gz | cut -f1)
+          orig_bytes=$(stat -c%s system.img)
+          comp_bytes=$(stat -c%s system.img.gz)
           ratio=$(echo "scale=2; (1 - $comp_bytes/$orig_bytes) * 100" | bc)
           echo "压缩率: $ratio%" >> build_info.txt
           
@@ -313,7 +313,7 @@ jobs:
     
     - name: 上传构建产物
       if: ${{ env.upload_artifact == 'true' }}
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: SGSI-build-output
         path: upload/*
@@ -321,13 +321,12 @@ jobs:
         
     - name: 上传到WeTransfer
       if: ${{ env.upload_wetransfer == 'true' }}
-      uses: cschleiden/wetransfer@v1
+      uses: mikepenz/wetransfer-action@v1
       with:
-        api-key: ${{ secrets.WETRANSFER_API_KEY }}
-        sources: upload/*
+        api_key: ${{ secrets.WETRANSFER_API_KEY }}
+        文件: upload/*
         message: "SGSI构建产物 #${{ github.run_number }}"
-        recipients: >
-          ["${{ github.actor }}@users.noreply.github.com"]
+        recipient: "${{ github.actor }}@users.noreply.github.com"
     
     - name: 显示最终摘要
       run: |
