@@ -1,6 +1,4 @@
-我理解您需要一个完整的整合方案，将带进度条的下载工具和ROM下载步骤整合到整个工作流中。以下是完整的 `build.yml` 文件，包含了优化的下载进度显示：
 
-```yaml
 name: build_XiaoxinSGSIs
 
 on:
