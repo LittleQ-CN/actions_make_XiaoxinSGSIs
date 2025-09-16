@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs
 
 on:
@@ -129,7 +130,7 @@ jobs:
           exit 1
         fi
         
-        echo "下载完成，大小: $((file_size/1024/1024))MB"
+        echo "下载完成，大小: $((file_size/1024/1024))MB")
     
     - name: 处理ROM类型
       if: ${{ env.rom_type != 'none' }}
@@ -300,6 +301,9 @@ jobs:
         
         mkdir -p ../upload
         mv "${pack_name}"* ../upload/ || true
+        
+        # 设置上传文件路径
+        echo "OUTPUT_FILE=$(ls $PWD/../upload/$pack_name* | head -n1)" >> $GITHUB_ENV
     
     - name: 发布GitHub版本
       uses: softprops/action-gh-release@v1
@@ -310,6 +314,8 @@ jobs:
         body: |
           构建 #${{ github.run_number }} 已完成！
           查看构建日志获取镜像压缩详情
+          
+          ${{ env.upload_wetransfer == 'true' && '> ️ **重要提示**：本构建包含WeTransfer下载链接（有效期7天），请在作业摘要中查看详情！' || '' }}
     
     - name: 上传构建产物
       if: ${{ env.upload_artifact == 'true' }}
@@ -321,12 +327,53 @@ jobs:
         
     - name: 上传到WeTransfer
       if: ${{ env.upload_wetransfer == 'true' }}
-      uses: mikepenz/wetransfer-action@v1
-      with:
-        api_key: ${{ secrets.WETRANSFER_API_KEY }}
-        文件: upload/*
-        message: "SGSI构建产物 #${{ github.run_number }}"
-        recipient: "${{ github.actor }}@users.noreply.github.com"
+      run: |
+        echo "☁️ 上传到WeTransfer..."
+        cd $GITHUB_WORKSPACE
+        
+        # 检查文件是否存在
+        if [ ! -f "$OUTPUT_FILE" ]; then
+          echo "::error::要上传的文件不存在: $OUTPUT_FILE"
+          exit 1
+        fi
+        
+        # 下载文件传输工具
+        echo "安装 file-transfer 工具..."
+        curl -sL https://git.io/file-transfer | sh
+        
+        # 获取文件大小信息
+        FILE_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
+        echo "开始上传文件: $OUTPUT_FILE (大小: $FILE_SIZE)..."
+        
+        # 计算到期日期
+        EXPIRY_DATE=$(date -d "+7 days" "+%Y-%m-%d")
+        
+        # 上传并获取结果
+        TRANSFER_OUTPUT=$(./transfer wet "$OUTPUT_FILE")
+        echo "$TRANSFER_OUTPUT"
+        
+        # 提取下载链接
+        DOWNLOAD_LINK=$(echo "$TRANSFER_OUTPUT" | grep -o 'https://we.tl/[^ ]*' | head -n1)
+        if [ -n "$DOWNLOAD_LINK" ]; then
+          # 添加到工作流摘要（带有效期声明）
+          echo "##  WeTransfer 下载地址" >> $GITHUB_STEP_SUMMARY
+          echo ">  ⏳ **链接有效期至 ${EXPIRY_DATE}**" >> $GITHUB_STEP_SUMMARY
+          echo "[点击下载]($DOWNLOAD_LINK)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "文件: $(basename "$OUTPUT_FILE")" >> $GITHUB_STEP_SUMMARY
+          
+          # 添加到控制台输出
+          echo "✅ WeTransfer上传成功！"
+          echo "📥 下载链接: $DOWNLOAD_LINK"
+          echo "⏳ 链接有效期至: ${EXPIRY_DATE}"
+          
+          # 设置环境变量供后续步骤使用
+          echo "DOWNLOAD_LINK=$DOWNLOAD_LINK" >> $GITHUB_ENV
+          echo "EXPIRY_DATE=$EXPIRY_DATE" >> $GITHUB_ENV
+        else
+          echo "::warning::未找到下载链接"
+          echo "TRANSFER_OUTPUT: $TRANSFER_OUTPUT" # 输出完整结果用于调试
+        fi
     
     - name: 显示最终摘要
       run: |
@@ -337,13 +384,7 @@ jobs:
         echo "ROM类型: ${{ env.rom_type }}"
         echo "构建编号: ${{ github.run_number }}"
         
-        if [ -f "SGSI-build-tool/final_out/build_info.txt" ]; then
-          echo "镜像压缩信息:"
-          cat SGSI-build-tool/final_out/build_info.txt
-        fi
-        
-        echo "::endgroup::"
-        
+        # 镜像压缩信息
         if [ -f "SGSI-build-tool/final_out/build_info.txt" ]; then
           orig_size=$(grep "原始大小" SGSI-build-tool/final_out/build_info.txt | cut -d: -f2 | xargs)
           comp_size=$(grep "压缩后大小" SGSI-build-tool/final_out/build_info.txt | cut -d: -f2 | xargs)
@@ -353,3 +394,12 @@ jobs:
             echo "✨ 镜像大小对比: ${orig_size} → ${comp_size} (节省 ${ratio})"
           fi
         fi
+        
+        # WeTransfer链接信息
+        if [[ -n "$DOWNLOAD_LINK" && -n "$EXPIRY_DATE" ]]; then
+          echo ""
+          echo "🌐 WeTransfer下载链接: $DOWNLOAD_LINK"
+          echo "⏳ 链接有效期至: $EXPIRY_DATE"
+        fi
+        
+        echo "::endgroup::"
