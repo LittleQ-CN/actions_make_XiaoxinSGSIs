@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs
 
 on:
@@ -87,132 +88,66 @@ jobs:
         cd $ROM_DIR
         curl -# -L "$ROM_URL" -o "$ROM_NAME"
 
-    - name: 准备系统镜像
+    - name: 准备构建环境
       run: |
-        echo "🖼️ 准备系统镜像..."
-        cd $ROM_DIR
+        echo "📂 准备构建环境..."
+        # 在构建目录创建tmp文件夹
+        mkdir -p $BUILD_DIR/tmp
         
-        # 解压ROM
-        echo "[系统] 解压ROM文件..."
-        7z x "$ROM_NAME" -y > unpack.log 2>&1
+        # 将ROM文件复制到构建目录的tmp文件夹
+        echo "复制ROM文件到构建目录..."
+        cp $ROM_DIR/"$ROM_NAME" $BUILD_DIR/tmp/
         
-        # 处理所有可能的ROM格式
-        if [ -f "system.img" ]; then
-          echo "✅ 已存在system.img，无需转换"
-        elif [ -f "system.img.br" ]; then
-          echo "🔧 解压system.img.br..."
-          brotli --decompress system.img.br -o system.img
-        elif [ -f "system.new.dat" ]; then
-          echo "🔧 转换dat格式为system.img..."
-          curl -sLO https://raw.githubusercontent.com/xpirt/sdat2img/master/sdat2img.py
-          python3 sdat2img.py system.transfer.list system.new.dat system.img > convert.log 2>&1
-        elif [ -f "system.new.dat.br" ]; then
-          echo "🔧 解压system.new.dat.br..."
-          brotli --decompress system.new.dat.br -o system.new.dat
-          echo "🔧 转换dat格式为system.img..."
-          curl -sLO https://raw.githubusercontent.com/xpirt/sdat2img/master/sdat2img.py
-          python3 sdat2img.py system.transfer.list system.new.dat system.img > convert.log 2>&1
-        elif [ -f "super.img" ]; then
-          echo "🔧 处理super分区..."
-          simg2img super.img super_raw.img >> unpack.log 2>&1
-          mkdir super_unpack
-          lpunpack super_raw.img super_unpack/ >> unpack.log 2>&1
-          SYSTEM_IMG=$(find super_unpack -type f -name "system.img" | head -n1)
-          if [ -n "$SYSTEM_IMG" ]; then
-            mv "$SYSTEM_IMG" system.img
-          fi
-        elif [ -f "payload.bin" ]; then
-          echo "🔧 处理payload.bin..."
-          curl -sL https://github.com/ssut/payload-dumper-go/releases/download/1.2.2/payload-dumper-go_1.2.2_linux_amd64.tar.gz -o payload-dumper-go.tar.gz
-          tar xzf payload-dumper-go.tar.gz
-          chmod +x payload-dumper-go
-          ./payload-dumper-go -p system payload.bin > dumper.log 2>&1
-          mv system.img system.img
-        else
-          SYSTEM_IMG=$(find . -type f \( -name "system.img" -o -name "system.img.br" -o -name "system.new.dat" -o -name "system.new.dat.br" -o -name "super.img" -o -name "payload.bin" \) | head -n1)
-          if [ -n "$SYSTEM_IMG" ]; then
-            echo "🔄 找到系统镜像: $SYSTEM_IMG，重新处理..."
-            mv "$SYSTEM_IMG" rom_file
-            cd ..
-            mv "$ROM_DIR/rom_file" "$ROM_DIR/rom_file"
-            cd $ROM_DIR
-            continue
-          else
-            echo "::error::未找到可识别的系统镜像文件"
-            echo "当前目录内容:"
-            ls -la
-            exit 1
-          fi
-        fi
-        
-        # 最终检查
-        if [ ! -f "system.img" ]; then
-          echo "::error::未找到有效的system.img"
-          echo "=== 解压日志最后20行 ==="
-          tail -n 20 unpack.log
-          [ -f "convert.log" ] && echo "=== 转换日志最后20行 ===" && tail -n 20 convert.log
-          [ -f "dumper.log" ] && echo "=== payload解压日志最后20行 ===" && tail -n 20 dumper.log
-          exit 1
-        fi
-        
-        echo "✅ 系统镜像准备完成"
-
-    - name: 提取版本信息
-      run: |
-        echo "📊 提取版本信息..."
-        cd $ROM_DIR
-        
-        if command -v debugfs &>/dev/null; then
-          debugfs -R "cat /system/build.prop" system.img > build.prop 2>/dev/null || true
-        fi
-        
-        if [ ! -s "build.prop" ]; then
-          7z x system.img -oextracted >/dev/null 2>&1
-          find extracted -name build.prop -exec cat {} + > build.prop || true
-        fi
-        
-        if [ -s "build.prop" ]; then
-          ANDROID_VERSION=$(grep "ro.build.version.release" build.prop | cut -d= -f2)
-          echo "Android版本: ${ANDROID_VERSION:-未知}"
-        else
-          echo "::warning::未找到build.prop文件，使用默认值10"
-          ANDROID_VERSION=10
-        fi
-        echo "ANDROID_VERSION=$ANDROID_VERSION" >> $GITHUB_ENV
+        # 将工具复制到构建目录的tmp文件夹
+        echo "复制工具到构建目录..."
+        cp -r到构建目录..."
+        cp -r SGSI-build-tool/10/* $BUILD_DIR/
 
     - name: 配置构建选项
       run: |
         echo "⚙️ 配置构建选项..."
         cd $BUILD_DIR
         
+        # 跳过权限更改
         sed -i 's/chown -R root:root/# chown -R root:root/g' make.sh
         sed -i 's/chmod -R 777/# chmod -R 777/g' make.sh
+        
+        # 禁用交互
         sed -i 's/read pause/# read pause/g' make.sh
         
+        # 配置所有支持的构建
+        
+        # 配置所有支持的构建模式
         if [ "$MAKE_SUPER" = 'true' ]; then
           sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
           echo "🔄 启用super分区模式"
         fi
+        
         if [ "$MAKE_MIUI" = 'true' ]; then
           sed -i 's/SGSI.sh/make_miui.sh/g' make.sh
           echo "🔄 启用MIUI构建模式"
         fi
+        
         if [ "$MAKE_FLYME" = 'true' ]; then
           sed -i 's/SGSI.sh/make_flyme.sh/g' make.sh
           echo "🔄 启用Flyme构建模式"
         fi
+        
         if [ "$MAKE_COLOROS" = 'true' ]; then
           sed -i 's/SGSI.sh/make_coloros.sh/g' make.sh
           echo "🔄 启用ColorOS构建模式"
         fi
+        
         if [ "$MAKE_H2OS" = 'true' ]; then
           sed -i 's/SGSI.sh/make_h2os.sh/g' make.sh
           echo "🔄 启用H2OS构建模式"
         fi
+        
         if [ "$MAKE_SMARTISANOS" = 'true' ]; then
           sed -i 's/SGSI.sh/make_smartisan.sh/g' make.sh
           echo "🔄 启用SmartisanOS构建模式"
         fi
+        
         if [ "$MAKE_ZUI" = 'true' ]; then
           sed -i 's/SGSI.sh/make_zui.sh/g' make.sh
           echo "🔄 启用ZUI构建模式"
@@ -223,12 +158,14 @@ jobs:
         echo "🏗️ 开始构建SGSI..."
         cd $BUILD_DIR
         
+        # 带进度监控的构建
         bash make.sh 2>&1 | tee build.log
         
+        # 检查构建结果
         if [ ! -d "out" ] && [ ! -d "SGSI" ]; then
           echo "::error::构建失败，未找到输出目录"
-          echo "=== 构建日志最后20行 ==="
-          tail -n 20 build.log
+          echo "=== 构建日志最后100行 ==="
+          tail -n 100 build.log
           exit 1
         fi
 
@@ -239,7 +176,10 @@ jobs:
         7za a -t7z -mx=9 "$OUTPUT_FILE" SGSI/* out/* > package.log 2>&1
         
         if [ -f "$OUTPUT_FILE" ]; then
+          # 获取文件大小
           FILE_SIZE=$(stat -c %s "$OUTPUT_FILE")
+          
+          # 格式化文件大小
           if command -v numfmt >/dev/null; then
             FORMATTED_SIZE=$(numfmt --to=iec-i --suffix=B $FILE_SIZE)
           else
@@ -251,6 +191,7 @@ jobs:
                 printf "%.2f %s", size, suffix[count]
               }')
           fi
+          
           echo "✅ 打包完成 | 大小: $FORMATTED_SIZE"
         else
           echo "::error::打包失败"
@@ -272,10 +213,6 @@ jobs:
       with:
         name: build-logs
         path: |
-          ${{ env.ROM_DIR }}/unpack.log
-          ${{ env.ROM_DIR }}/convert.log
-          ${{ env.ROM_DIR }}/dumper.log
-          ${{ env.ROM_DIR }}/build.prop
           ${{ env.BUILD_DIR }}/build.log
           ${{ env.BUILD_DIR }}/package.log
 
@@ -286,9 +223,11 @@ jobs:
         cd $BUILD_DIR
         curl -sL https://git.io/file-transfer | sh
         
+        # 完整输出传输结果
         TRANSFER_OUTPUT=$(./transfer wet "$OUTPUT_FILE")
         echo "$TRANSFER_OUTPUT"
         
+        # 提取下载链接
         DOWNLOAD_LINK=$(echo "$TRANSFER_OUTPUT" | grep 'Download Link' | cut -d: -f2- | xargs)
         if [ -n "$DOWNLOAD_LINK" ]; then
           echo "## WeTransfer下载地址" >> $GITHUB_STEP_SUMMARY
@@ -300,6 +239,6 @@ jobs:
     - name: 清理工作区
       run: |
         echo "🧹 最终清理..."
-        rm -rf $ROM_DIR $BUILD_DIR/SGSI $BUILD_DIR/out
+        rm -rf $ROM_DIR $BUILD_DIR
         df -h
         echo "✅ 构建流程完成"
