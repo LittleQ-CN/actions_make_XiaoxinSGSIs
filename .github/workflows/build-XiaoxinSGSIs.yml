@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs
 
 on:
@@ -79,6 +80,20 @@ jobs:
         mkdir -p $BUILD_DIR/SGSI
         curl -# -L "$TOOLKIT_URL" -o toolkit.tar
         tar -xf toolkit.tar -C $BUILD_DIR/
+        
+        # 检查工具箱内容
+        echo "列出工具箱解压后的目录内容:"
+        ls -la $BUILD_DIR/
+        
+        # 确保make.sh存在
+        if [ -f "$BUILD_DIR/make.sh" ]; then
+          echo "✅ make.sh存在"
+        else
+          echo "::error::make.sh文件缺失，请检查工具箱压缩包内容"
+          echo "当前目录内容:"
+          ls -la $BUILD_DIR/
+          exit 1
+        fi
 
     - name: 下载ROM
       run: |
@@ -97,13 +112,22 @@ jobs:
         echo "复制ROM文件到构建目录..."
         cp $ROM_DIR/"$ROM_NAME" $BUILD_DIR/tmp/
         
-        # 不再复制工具（已在"获取工具箱"步骤处理）
-        echo "工具箱已就位，无需再次复制"
+        # 列出构建目录内容
+        echo "构建目录内容:"
+        ls -la $BUILD_DIR/
 
     - name: 配置构建选项
       run: |
         echo "⚙️ 配置构建选项..."
         cd $BUILD_DIR
+        
+        # 确保make.sh存在
+        if [ ! -f "make.sh" ]; then
+          echo "::error::make.sh文件不存在，无法配置构建选项"
+          echo "当前目录内容:"
+          ls -la
+          exit 1
+        fi
         
         # 跳过权限更改
         sed -i 's/chown -R root:root/# chown -R root:root/g' make.sh
