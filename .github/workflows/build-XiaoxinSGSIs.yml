@@ -8,7 +8,9 @@ on:
 env:
   BUILD_DIR: SGSI-build-tool/10
   ROM_DIR: tmp
+  # 修正后的工具箱链接 ▼▼▼
   TOOLKIT_URL: https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar
+  # 修正后的工具箱链接 ▲▲▲
   MAX_LOG_LINES: 1000
 
 jobs:
@@ -77,30 +79,43 @@ jobs:
     - name: 获取工具箱
       run: |
         echo "📦 下载工具箱..."
-        mkdir -p $BUILD_DIR/SGSI
+        echo "工具箱URL: $TOOLKIT_URL"  # 添加URL显示用于调试
+        mkdir -p $BUILD_DIR
         curl -# -L "$TOOLKIT_URL" -o toolkit.tar
+        
+        # 解压工具箱并检查内容
+        echo "解压工具箱..."
         tar -xf toolkit.tar -C $BUILD_DIR/
         
-        # 检查工具箱内容
-        echo "列出工具箱解压后的目录内容:"
-        ls -la $BUILD_DIR/
+        # 添加详细的目录检查
+        echo "工具箱解压内容:"
+        find $BUILD_DIR -type f | sort
         
-        # 确保make.sh存在
-        if [ -f "$BUILD_DIR/make.sh" ]; then
-          echo "✅ make.sh存在"
-        else
-          echo "::error::make.sh文件缺失，请检查工具箱压缩包内容"
-          echo "当前目录内容:"
-          ls -la $BUILD_DIR/
+        # 确保关键文件存在
+        if [ ! -f "$BUILD_DIR/make.sh" ]; then
+          echo "::error::make.sh文件缺失！"
+          echo "目录结构:"
+          tree $BUILD_DIR || ls -R $BUILD_DIR
           exit 1
         fi
+        
+        # 赋予执行权限
+        chmod +x $BUILD_DIR/*.sh
 
     - name: 下载ROM
       run: |
         echo "⬇️ 下载ROM文件..."
+        echo "ROM URL: $ROM_URL"
+        echo "目标文件名: $ROM_NAME"
         mkdir -p $ROM_DIR
         cd $ROM_DIR
         curl -# -L "$ROM_URL" -o "$ROM_NAME"
+        
+        # 检查下载是否成功
+        if [ ! -f "$ROM_NAME" ]; then
+          echo "::error::ROM下载失败！"
+          exit 1
+        fi
 
     - name: 准备构建环境
       run: |
@@ -192,6 +207,13 @@ jobs:
       run: |
         echo "📦 打包成果物..."
         cd $BUILD_DIR
+        
+        # 检查是否确实有内容可打包
+        echo "SGSI目录内容:"
+        ls -la SGSI/
+        echo "out目录内容:"
+        ls -la out/
+        
         7za a -t7z -mx=9 "$OUTPUT_FILE" SGSI/* out/* > package.log 2>&1
         
         if [ -f "$OUTPUT_FILE" ]; then
@@ -240,9 +262,17 @@ jobs:
       run: |
         echo "☁️ 上传到WeTransfer..."
         cd $BUILD_DIR
+        
+        # 确保文件存在
+        if [ ! -f "$OUTPUT_FILE" ]; then
+          echo "::error::要上传的文件不存在: $OUTPUT_FILE"
+          exit 1
+        fi
+        
         curl -sL https://git.io/file-transfer | sh
         
         # 完整输出传输结果
+        echo "开始上传文件 (大小: $(du -h $OUTPUT_FILE | cut -f1))..."
         TRANSFER_OUTPUT=$(./transfer wet "$OUTPUT_FILE")
         echo "$TRANSFER_OUTPUT"
         
