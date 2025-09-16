@@ -19,7 +19,7 @@ jobs:
     - name: 检出代码库
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # 确保获取所有文件历史
+        fetch-depth: 0
         
     - name: 验证配置文件存在
       id: config_check
@@ -44,10 +44,29 @@ jobs:
         cp sgsi.json config_backup.json
         echo "✅ 配置文件验证通过"
     
+    - name: 安装依赖工具
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq
+        
+        # 验证jq安装
+        if ! command -v jq &> /dev/null; then
+          echo "::error::❌ jq 未安装成功"
+          exit 1
+        fi
+        echo "✅ jq 版本: $(jq --version)"
+    
     - name: 读取配置文件
       id: config
       run: |
-        # 使用备份文件确保读取安全
+        # 确保备份文件存在
+        if [ ! -f "config_backup.json" ]; then
+          echo "::error::❌ 配置文件备份不存在"
+          echo "请检查上一步是否成功创建 config_backup.json"
+          exit 1
+        fi
+        
+        # 读取关键字段
         rom_url=$(jq -r '.rom_url' config_backup.json)
         rom_name=$(jq -r '.rom_name' config_backup.json)
         pack_sgsi=$(jq -r '.pack_sgsi' config_backup.json)
@@ -65,13 +84,26 @@ jobs:
           exit 1
         fi
         
+        # 如果rom_name为空，则从URL中提取文件名
+        if [ -z "$rom_name" ] || [ "$rom_name" == "null" ]; then
+          rom_name=$(basename "$rom_url")
+          echo "ℹ️ 从URL提取ROM文件名: $rom_name"
+        fi
+        
         # 处理ROM类型
         rom_types=(miui flyme coloros h2os smartisanos zui)
         type_count=0
         current_type=""
         
+        echo "🔍 检查ROM类型配置:"
         for type in "${rom_types[@]}"; do
-          value=$(jq -r ".make_$type" config_backup.json)
+          value=$(jq -r ".make_$type" config_backup.json 2>/dev/null || echo "false")
+          
+          # 处理null值
+          [ "$value" == "null" ] && value="false"
+          
+          echo "  make_$type = $value"
+          
           if [ "$value" == "true" ]; then
             ((type_count++))
             current_type=$type
@@ -98,22 +130,33 @@ jobs:
           uppercase_type="${current_type^}"
           lowercase_type="${current_type}"
           
+          script_path=""
+          
+          # 优先尝试大写文件名
           if [ -f "fix/${uppercase_type}.sh" ]; then
-            cp "fix/${uppercase_type}.sh" tmp_fix/fixbug.sh
-            echo "使用修复脚本: fix/${uppercase_type}.sh"
+            script_path="fix/${uppercase_type}.sh"
           elif [ -f "fix/${lowercase_type}.sh" ]; then
-            cp "fix/${lowercase_type}.sh" tmp_fix/fixbug.sh
-            echo "使用修复脚本: fix/${lowercase_type}.sh"
+            script_path="fix/${lowercase_type}.sh"
+          fi
+          
+          if [ -n "$script_path" ]; then
+            cp "$script_path" tmp_fix/fixbug.sh
+            echo "✅ 使用修复脚本: $script_path"
           else
             echo "::warning::⚠️ 未找到 ${current_type} 修复脚本"
+            # 创建空修复脚本防止后续步骤失败
+            touch tmp_fix/fixbug.sh
           fi
+        else
+          echo "ℹ️ 未启用ROM类型，跳过修复脚本复制"
         fi
         
-        # 显示读取的配置
+        # 显示读取的配置摘要
         echo "✅ 配置读取成功:"
         echo "  ROM URL: $rom_url"
         echo "  ROM名称: $rom_name"
         echo "  ROM类型: ${current_type:-无}"
+        echo "  打包名称: $pack_sgsi"
         echo "  Artifact上传: $upload_artifact"
         echo "  WeTransfer上传: $upload_wetransfer"
     
@@ -411,7 +454,7 @@ jobs:
           构建 #${{ github.run_number }} 已完成！
           查看构建日志获取镜像压缩详情
           
-          ${{ env.upload_wetransfer == 'true' && '>  ⚠️ **重要提示**：本构建包含WeTransfer下载链接（有效期7天），请在作业摘要中查看详情！' || '' }}
+          ${{ env.upload_wetransfer == 'true' && '>  ️ **重要提示**：本构建包含WeTransfer下载链接（有效期7天），请在作业摘要中查看详情！' || '' }}
     
     - name: 上传构建产物
       if: ${{ env.upload_artifact == 'true' }}
@@ -453,7 +496,7 @@ jobs:
         if [ -n "$DOWNLOAD_LINK" ]; then
           # 添加到工作流摘要（带有效期声明）
           echo "##   WeTransfer 下载地址" >> $GITHUB_STEP_SUMMARY
-          echo ">  ⏳ **链接有效期至 ${EXPIRY_DATE}**" >> $GITHUB_STEP_SUMMARY
+          echo ">   **链接有效期至 ${EXPIRY_DATE}**" >> $GITHUB_STEP_SUMMARY
           echo "[点击下载]($DOWNLOAD_LINK)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "文件: $(basename "$OUTPUT_FILE")" >> $GITHUB_STEP_SUMMARY
