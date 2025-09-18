@@ -1,5 +1,4 @@
-
-name: build_XiaoxinSGSIs
+name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
   watch:
@@ -11,60 +10,21 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-    - name: 初始化环境
+    - name: 检出代码库
+      uses: actions/checkout@v3
+      
+    - name: 清理工作区
       run: |
         rm -rf SGSI-build-tool upload || true
         df -h
         
-    - name: 检出代码库
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        
-    - name: 验证配置文件存在
-      id: config_check
-      run: |
-        echo "📁 当前目录内容:"
-        ls -la
-        
-        if [ ! -f sgsi.json ]; then
-          echo "::error::❌ sgsi.json 配置文件不存在"
-          echo "请在仓库根目录创建sgsi.json文件并填写配置"
-          exit 1
-        fi
-        echo "✅ 配置文件存在"
-    
-    - name: 安装依赖工具
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y jq pigz aria2
-        
-        if ! command -v jq &> /dev/null; then
-          echo "::error::❌ jq 未安装成功"
-          exit 1
-        fi
-        echo "✅ jq 版本: $(jq --version)"
-        
-        if ! command -v pigz &> /dev/null; then
-          echo "::warning::⚠️ pigz 未安装，将使用gzip进行压缩"
-        fi
-    
     - name: 读取配置文件
-      id: config
+      id: var
       run: |
-        # 验证JSON格式
-        if ! jq empty sgsi.json; then
-          echo "::error::❌ sgsi.json 格式无效"
-          echo "请检查JSON语法是否正确"
-          exit 1
-        fi
-        
-        # 读取所有配置字段
+        # 从sgsi.json读取配置
         rom_url=$(jq -r '.rom_url' sgsi.json)
         rom_name=$(jq -r '.rom_name' sgsi.json)
         pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
-        upload_artifact=$(jq -r '.upload_artifact' sgsi.json)
-        upload_wetransfer=$(jq -r '.upload_wetransfer' sgsi.json)
         make_miui=$(jq -r '.make_miui' sgsi.json)
         make_flyme=$(jq -r '.make_flyme' sgsi.json)
         make_coloros=$(jq -r '.make_coloros' sgsi.json)
@@ -73,58 +33,10 @@ jobs:
         make_zui=$(jq -r '.make_zui' sgsi.json)
         make_super=$(jq -r '.make_super' sgsi.json)
         
-        # 设置默认值（处理null值）
-        [ "$upload_artifact" == "null" ] && upload_artifact=true
-        [ "$upload_wetransfer" == "null" ] && upload_wetransfer=false
-        [ "$make_super" == "null" ] && make_super=false
-        
-        # 检查必需字段
-        if [ -z "$rom_url" ] || [ "$rom_url" == "null" ]; then
-          echo "::error::❌ rom_url 未定义"
-          echo "请在sgsi.json中提供rom_url"
-          exit 1
-        fi
-        
-        # 如果rom_name为空，则从URL中提取文件名
-        if [ -z "$rom_name" ] || [ "$rom_name" == "null" ]; then
-          rom_name=$(basename "$rom_url")
-          echo "ℹ️ 从URL提取ROM文件名: $rom_name"
-        fi
-        
-        # ROM类型检查
-        rom_types=(miui flyme coloros h2os smartisanos zui)
-        type_count=0
-        current_type=""
-        
-        echo "🔍 检查ROM类型配置:"
-        for type in "${rom_types[@]}"; do
-          # 使用动态变量名
-          value_name="make_${type}"
-          value=${!value_name}
-          
-          # 处理null值
-          [ "$value" == "null" ] && value="false"
-          
-          echo "  make_$type = $value"
-          
-          if [ "$value" == "true" ]; then
-            type_count=$((type_count + 1))
-            current_type=$type
-          fi
-        done
-        
-        if [ $type_count -gt 1 ]; then
-          echo "::error::❌ 只能启用一个ROM类型"
-          echo "请检查sgsi.json配置，只能有一个make_*设为true"
-          exit 1
-        fi
-        
-        # 输出环境变量
+        # 使用环境文件设置环境变量（解决set-output弃用问题）
         echo "rom_url=$rom_url" >> $GITHUB_ENV
         echo "rom_name=$rom_name" >> $GITHUB_ENV
         echo "pack_sgsi=$pack_sgsi" >> $GITHUB_ENV
-        echo "upload_artifact=$upload_artifact" >> $GITHUB_ENV
-        echo "upload_wetransfer=$upload_wetransfer" >> $GITHUB_ENV
         echo "make_miui=$make_miui" >> $GITHUB_ENV
         echo "make_flyme=$make_flyme" >> $GITHUB_ENV
         echo "make_coloros=$make_coloros" >> $GITHUB_ENV
@@ -132,570 +44,387 @@ jobs:
         echo "make_smartisanos=$make_smartisanos" >> $GITHUB_ENV
         echo "make_zui=$make_zui" >> $GITHUB_ENV
         echo "make_super=$make_super" >> $GITHUB_ENV
-        echo "rom_type=$current_type" >> $GITHUB_ENV
         
-        # 显示读取的配置摘要
-        echo "✅ 配置读取成功:"
-        echo "  ROM URL: $rom_url"
-        echo "  ROM名称: $rom_name"
-        echo "  ROM类型: ${current_type:-无}"
-        echo "  打包名称: $pack_sgsi"
-        echo "  Artifact上传: $upload_artifact"
-        echo "  WeTransfer上传: $upload_wetransfer"
-    
-    - name: 下载构建工具（带进度条）
-      timeout-minutes: 5
+    - name: 下载构建工具
       run: |
-        tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
-        filename="SGSI-build-tool.tar"
-        
-        # 获取文件大小函数
-        get_file_size() {
-          curl -sI "$1" | grep -i 'content-length' | awk '{print $2}' | tr -d '\r'
-        }
-        
-        # 格式化文件大小函数
-        format_size() {
-          local size=$1
-          if [ $size -ge $((1024*1024*1024)) ]; then
-            printf "%.1fGB" $(echo "scale=1; $size/(1024*1024*1024)" | bc)
-          elif [ $size -ge $((1024*1024)) ]; then
-            printf "%.1fMB" $(echo "scale=1; $size/(1024*1024)" | bc)
-          elif [ $size -ge 1024 ]; then
-            printf "%.1fKB" $(echo "scale=1; $size/1024" | bc)
+        # 使用curl静默下载并重试
+        max_retries=3
+        for i in $(seq 1 $max_retries); do
+          echo "尝试下载构建工具 (第 $i 次)"
+          if command -v curl &> /dev/null; then
+            curl -fL -o SGSI-build-tool.tar https://ghproxy.com/https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar && break
           else
-            printf "%dB" $size
+            wget -c -O SGSI-build-tool.tar https://ghproxy.com/https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar && break
           fi
-        }
+          sleep 5
+        done
         
-        # 获取文件大小
-        file_size=$(get_file_size "$tool_url")
-        if [ -z "$file_size" ]; then
-          file_size=$((150*1024*1024))  # 默认150MB
-          echo "⚠️ 无法获取文件大小，使用默认值: $(format_size $file_size)"
-        else
-          echo "ℹ️ 文件大小: $(format_size $file_size)"
+        if [ ! -f SGSI-build-tool.tar ]; then
+          # 尝试备用源
+          curl -fL -o SGSI-build-tool.tar https://hub.yzuu.cf/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar || {
+            echo "::error::工具包下载失败"
+            exit 1
+          }
         fi
         
-        formatted_size=$(format_size $file_size)
-        echo "⬇️ 下载 $filename [$formatted_size]"
-        
-        # 进度条函数
-        progress_bar() {
-          local total=$1
-          local current=$2
-          local width=20  # 进度条宽度
-          local percent=$((current * 100 / total))
-          local progress=$((current * width / total))
-          local rest=$((width - progress))
-          
-          printf "\r["
-          printf "%${progress}s" | tr ' ' '#'
-          printf "%${rest}s" | tr ' ' '-'
-          printf "] %3d%%" $percent
-        }
-        
-        # 使用curl下载并显示进度
-        download_with_curl() {
-          echo "⚙️ 使用 curl"
-          curl -L --progress-bar -o "$filename" "$tool_url" \
-            | while IFS= read -r line; do
-                if [[ $line =~ ([0-9]+)\ ([0-9.]+)% ]]; then
-                  current=${BASH_REMATCH[1]}
-                  progress_bar $file_size $current
-                fi
-              done
-          echo  # 新行
-        }
-        
-        # 使用aria2c下载并显示进度
-        download_with_aria2c() {
-          echo "⚙️ 使用 aria2c"
-          aria2c -x8 -s8 -k1M --show-console-readout=false --summary-interval=1 \
-                 "$tool_url" -o "$filename" 2>&1 \
-            | while IFS= read -r line; do
-                if [[ $line =~ \(([0-9]*)%\) ]]; then
-                  percent=${BASH_REMATCH[1]}
-                  current=$((file_size * percent / 100))
-                  progress_bar $file_size $current
-                fi
-              done
-          echo  # 新行
-        }
-        
-        # 尝试下载
-        if command -v aria2c &> /dev/null; then
-          download_with_aria2c
-        else
-          download_with_curl
-        fi
-        
-        # 验证下载
-        if [ ! -f "$filename" ]; then
-          echo "::error::❌ 下载失败"
-          exit 1
-        fi
-        
-        # 验证文件大小
-        actual_size=$(stat -c%s "$filename")
-        if [ $actual_size -lt $((file_size * 9 / 10)) ]; then
-          echo "::error::❌ 文件大小不匹配 (应为: $formatted_size, 实际: $(format_size $actual_size))"
-          exit 1
-        fi
-        
-        # 验证压缩包完整性
-        if ! tar -tf "$filename" >/dev/null 2>&1; then
-          echo "::error::❌ 工具包损坏"
-          exit 1
-        fi
-        
-        echo "✅ 下载完成 [$(format_size $actual_size)]"
-        echo "✅ 工具包验证通过"
-    
     - name: 设置构建环境
       run: |
-        tar -xf SGSI-build-tool.tar
-        chmod -R +x SGSI-build-tool
+        tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
         
+        if [ ! -d "SGSI-build-tool" ]; then
+          echo "::error::未找到SGSI-build-tool目录"
+          ls -la
+          exit 1
+        fi
+        
+        # 设置执行权限
+        find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
+        chmod +x SGSI-build-tool/10/bin/*
+        
+        # 初始化环境
         cd SGSI-build-tool/10
-        ./setup.sh || echo "⚠️ 忽略非关键错误"
+        ./setup.sh || true
         cd ../..
         
-        echo "🛠️ 构建环境已设置"
-    
-    - name: 下载ROM文件（带进度条）
-      timeout-minutes: 30
+    - name: 磁盘空间监控
       run: |
+        echo "::group::磁盘空间检查"
+        df -h
+        min_free=10 # 最小10GB空闲空间
+        free_space=$(df -BG . | awk 'NR==2 {print $4}' | tr -d 'G')
+        
+        if [ "$free_space" -lt "$min_free" ]; then
+          echo "::error::磁盘空间不足! 需要至少 ${min_free}GB, 当前只有 ${free_space}GB"
+          exit 1
+        fi
+        echo "::endgroup::"
+        
+    - name: 下载ROM文件
+      run: |
+        mkdir -p SGSI-build-tool/10/tmp
         rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
-        rom_url="${{ env.rom_url }}"
-        filename="${{ env.rom_name }}"
-        echo "⬇️ 下载ROM: ${{ env.rom_url }}"
         
-        # 确保目录存在
-        mkdir -p "$(dirname "$rom_path")"
-        
-        # 获取文件大小函数
-        get_file_size() {
-          curl -sI "$1" | grep -i 'content-length' | awk '{print $2}' | tr -d '\r'
-        }
-        
-        # 格式化文件大小函数
-        format_size() {
-          local size=$1
-          if [ $size -ge $((1024*1024*1024)) ]; then
-            printf "%.1fGB" $(echo "scale=1; $size/(1024*1024*1024)" | bc)
-          elif [ $size -ge $((1024*1024)) ]; then
-            printf "%.1fMB" $(echo "scale=1; $size/(1024*1024)" | bc)
-          elif [ $size -ge 1024 ]; then
-            printf "%.1fKB" $(echo "scale=1; $size/1024" | bc)
+        # 带进度显示和重试的下载
+        function download_with_progress() {
+          if command -v curl &> /dev/null; then
+            curl -# -L -k -C - "$1" -o "$2"
           else
-            printf "%dB" $size
+            wget --progress=bar:force -c "$1" -O "$2"
           fi
         }
         
-        # 获取文件大小
-        file_size=$(get_file_size "$rom_url")
-        if [ -z "$file_size" ]; then
-          # 使用默认大小提示（不强制）
-          min_size=$((100*1024*1024))  # 100MB
-          echo "⚠️ 无法获取ROM文件大小，将使用默认验证阈值: $(format_size $min_size)"
-        else
-          echo "ℹ️ ROM大小: $(format_size $file_size)"
-        fi
-        
-        formatted_size=$(format_size ${file_size:-0})
-        echo "⬇️ 下载 $filename [${formatted_size:-未知大小}]"
-        
-        # 进度条函数（同上）
-        progress_bar() {
-          local total=$1
-          local current=$2
-          local width=20  # 进度条宽度
-          local percent=$((current * 100 / total))
-          local progress=$((current * width / total))
-          local rest=$((width - progress))
-          
-          printf "\r["
-          printf "%${progress}s" | tr ' ' '#'
-          printf "%${rest}s" | tr ' ' '-'
-          printf "] %3d%%" $percent
-        }
-        
-        # 使用aria2c下载并显示进度（优先）
-        if command -v aria2c &> /dev/null; then
-          echo "⚙️ 使用 aria2c"
-          aria2c -x8 -s8 -k1M --show-console-readout=false --summary-interval=1 \
-                 "$rom_url" -d "$(dirname "$rom_path")" -o "$filename" 2>&1 \
-            | while IFS= read -r line; do
-                if [[ $line =~ \(([0-9]*)%\) ]]; then
-                  percent=${BASH_REMATCH[1]}
-                  # 如果知道文件大小，则计算当前字节数，否则用百分比模拟
-                  if [ -n "$file_size" ]; then
-                    current=$((file_size * percent / 100))
-                    progress_bar $file_size $current
-                  else
-                    # 未知文件大小时只显示百分比
-                    printf "\r[%-20s] %3d%%" $(printf "%${percent}s" | tr ' ' '#') $percent
-                  fi
-                fi
-              done
-          echo  # 新行
-        else
-          # 使用curl作为备选
-          echo "⚙️ 使用 curl"
-          curl -L --progress-bar -o "$rom_path" "$rom_url" \
-            | while IFS= read -r line; do
-                if [[ $line =~ ([0-9]+)\ ([0-9.]+)% ]]; then
-                  current=${BASH_REMATCH[1]}
-                  if [ -n "$file_size" ]; then
-                    progress_bar $file_size $current
-                  else
-                    percent=${BASH_REMATCH[2]}
-                    printf "\r[%-20s] %3d%%" $(printf "%${percent}s" | tr ' ' '#') ${BASH_REMATCH[2]%.*}
-                  fi
-                fi
-              done
-          echo  # 新行
-        fi
-        
-        # 验证下载的文件
+        max_retries=5
+        for i in $(seq 1 $max_retries); do
+          echo "下载ROM文件 (尝试 $i/$max_retries)"
+          download_with_progress "${{ env.rom_url }}" "$rom_path" && break
+          sleep 10
+          echo "下载中断，继续尝试..."
+        done
+
         if [ ! -f "$rom_path" ]; then
-          echo "::error::❌ ROM下载失败"
+          echo "::error::ROM文件下载失败"
           exit 1
         fi
         
-        actual_size=$(stat -c%s "$rom_path")
-        if [ -n "$file_size" ]; then
-          if [ $actual_size -lt $((file_size * 9 / 10)) ]; then
-            echo "::error::❌ ROM大小不匹配 (应为: $(format_size $file_size), 实际: $(format_size $actual_size))"
-            exit 1
-          fi
-        else
-          # 没有原始文件大小时，验证最小大小
-          min_size=$((100*1024*1024))  # 100MB
-          if [ $actual_size -lt $min_size ]; then
-            echo "::error::❌ ROM文件异常 (大小: $(format_size $actual_size))"
-            exit 1
-          fi
+        # 校验最小文件大小
+        min_size=$((100*1024*1024)) # 100MB
+        file_size=$(stat -c%s "$rom_path")
+        if [ $file_size -lt $min_size ]; then
+          echo "::error::ROM文件过小 (${file_size}字节)，可能不完整"
+          exit 1
         fi
-        
-        echo "✅ ROM下载完成 [$(format_size $actual_size)]"
     
-    - name: 处理ROM类型
+    - name: 启用Super分区支持
+      if: ${{ env.make_super == 'true' }}
+      run: sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
+    
+    - name: 生成MIUI镜像
+      if: ${{ env.make_miui == 'true' }}
       run: |
-        cd SGSI-build-tool/10
+        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
-        # 应用通用修复脚本
-        if [ -f "../../fix/fixbug.sh" ]; then
-          cp ../../fix/fixbug.sh fixbug/fixbug.sh
-          chmod +x fixbug/fixbug.sh
-          echo "🛠️ 应用通用修复脚本..."
-          ./fixbug/fixbug.sh || echo "⚠️ 通用修复脚本执行异常"
-        fi
+    - name: 生成Flyme镜像
+      if: ${{ env.make_flyme == 'true' }}
+      run: |
+        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
-        # 应用ROM类型专用脚本
-        if [ -n "${{ env.rom_type }}" ] && [ -f "../../fix/${{ env.rom_type }}_fixbug.sh" ]; then
-          cp "../../fix/${{ env.rom_type }}_fixbug.sh" "fixbug/${{ env.rom_type }}_fixbug.sh"
-          chmod +x "fixbug/${{ env.rom_type }}_fixbug.sh"
-          echo "🛠️ 应用${{ env.rom_type }}专用修复脚本..."
-          ./fixbug/${{ env.rom_type }}_fixbug.sh || echo "⚠️ ${{ env.rom_type }}修复脚本执行异常"
-        fi
+    - name: 生成ColorOS镜像
+      if: ${{ env.make_coloros == 'true' }}
+      run: |
+        python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ env.rom_name }}
+        rm -f SGSI-build-tool/10/tmp/${{ env.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
-        # ROM类型特殊处理
-        case "${{ env.rom_type }}" in
-          coloros)
-            echo "🔓 解密ColorOS ROM..."
-            python3 oppo_ozip/ozipdecrypt.py "tmp/${{ env.rom_name }}"
-            decrypted_file="${rom_name%.*}.img"
-            if [ -f "tmp/$decrypted_file" ]; then
-              rm -f "tmp/${{ env.rom_name }}"
-              echo "✅ 解密成功: $decrypted_file"
-              echo "rom_name=$decrypted_file" >> $GITHUB_ENV
-            else
-              echo "::error::❌ ColorOS解密失败"
-              exit 1
-            fi
-            ;;
-          miui)
-            echo "🍚 执行MIUI特殊处理..."
-            # 这里可以添加MIUI特定的处理逻辑
-            ;;
-          *)
-            echo "ℹ️ ROM类型: ${{ env.rom_type }}，无需特殊处理"
-            ;;
-        esac
+    - name: 生成HydrogenOS镜像
+      if: ${{ env.make_h2os == 'true' }}
+      run: |
+        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
         
-        # 处理Super分区支持
-        if [ "${{ env.make_super }}" == "true" ]; then
-          sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
-          echo "🛠️ 启用Super分区支持"
-        fi
-    
-    - name: 构建系统镜像
+    - name: 生成SmartisanOS镜像
+      if: ${{ env.make_smartisanos == 'true' }}
+      run: |
+        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+        
+    - name: 生成ZUI镜像
+      if: ${{ env.make_zui == 'true' }}
+      run: |
+        rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+        mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+        chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
+         
+    - name: 构建SGSI系统镜像
       timeout-minutes: 120
       run: |
+        set -euo pipefail  # 启用严格错误处理
+        
+        echo "::group::准备构建环境"
+        # 确保所有脚本文件有执行权限
+        find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
+        chmod +x SGSI-build-tool/10/bin/*
+        
+        # 移除权限相关命令
+        find SGSI-build-tool/10 -type f -exec sed -i '/chown/d' {} \;
+        
+        # 准备构建文件
+        rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
+        mv make/* SGSI-build-tool/10/
+        mv bin/* SGSI-build-tool/10/bin/
+        
+        # 创建输出目录结构
         cd SGSI-build-tool/10
+        mkdir -p out/{system,config}
+        mkdir -p out/system/{bin,etc,lib,usr,framework,app,priv-app,vendor}
         
-        # 复制自定义文件
-        if [ -d "../../make" ]; then
-          cp -f ../../make/* ./
-          echo "📂 已添加自定义make文件"
-        fi
-        if [ -d "../../bin" ]; then
-          cp -f ../../bin/* bin/
-          echo "📂 已添加自定义bin文件"
-        fi
+        # 创建默认配置文件
+        echo -e "# 默认文件上下文\n/system(/.*)? u:object_r:system_file:s0\n/vendor(/.*)? u:object_r:vendor_file:s0" > out/config/system_file_contexts
+        echo -e "# 默认文件系统配置\n/system 0 0 755\n/vendor 0 0 755" > out/config/system_fs_config
         
-        # 确保脚本可执行
-        find . -name "*.sh" -exec chmod +x {} \;
-        chmod +x bin/*
+        # 关键文件校验
+        required_files=(
+          "make.sh"
+          "bin/mke2fs"
+          "bin/e2fsdroid"
+          "bin/simg2img"
+          "bin/img2simg"
+          "fixbug/fixbug.sh"
+        )
         
-        echo "::group::📜 构建日志"
-        ./make.sh || build_failed=true
-        echo "::endgroup::"
-        
-        if [ "$build_failed" = true ]; then
-          echo "⚠️ 构建失败，尝试手动创建镜像..."
-          if [ -d "out/system" ]; then
-            size_kb=$(du -sk out/system/ | cut -f1)
-            img_size_kb=$((size_kb * 130 / 100))
-            img_size_mb=$((img_size_kb / 1024))
-            [ $img_size_mb -lt 512 ] && img_size_mb=512
-            
-            ./bin/make_ext4fs -T 0 -S out/config/system_file_contexts \
-                              -C out/config/system_fs_config \
-                              -l ${img_size_mb}M -a system out/system.img out/system/
-            
-            if [ -f "out/system.img" ]; then
-              mkdir -p SGSI
-              mv out/system.img SGSI/
-              echo "✅ 手动创建镜像成功"
-            else
-              echo "::error::❌ 无法手动创建镜像"
-              exit 1
-            fi
-          else
-            echo "::error::❌ 构建失败且无可用系统文件"
+        for file in "${required_files[@]}"; do
+          if [ ! -f "$file" ]; then
+            echo "::error::关键文件缺失: $file"
             exit 1
           fi
-        else
-          echo "✅ 构建成功"
-        fi
+        done
         
-        # 整理输出文件
-        mkdir -p ../final_out
-        mv SGSI/* ../final_out/ 2>/dev/null || true
-        mv out/*.img ../final_out/ 2>/dev/null || true
-        
-        if [ -f "../final_out/system.img" ]; then
-          orig_size=$(du -h "../final_out/system.img" | cut -f1)
-          echo "原始大小: $orig_size" >> ../final_out/build_info.txt
-        fi
-        
-        echo "📁 输出文件列表:"
-        ls -l ../final_out/
-    
-    - name: 打包补丁
-      if: ${{ success() }}
-      run: |
-        if [ -d "Patch" ]; then
-          cd Patch
-          for dir in */; do
-            if [ -d "$dir" ]; then
-              dir_name="${dir%/}"
-              echo "📦 打包补丁: $dir_name"
-              zip -r -0 "../../SGSI-build-tool/final_out/${dir_name}.zip" "$dir_name"
-            fi
-          done
-          cd ..
-        else
-          echo "ℹ️ 未找到Patch目录，跳过补丁打包"
-        fi
-    
-    - name: 压缩系统镜像
-      if: ${{ success() }}
-      run: |
-        cd SGSI-build-tool/final_out
-        
-        if [ -f "system.img" ]; then
-          echo "📦 开始压缩system.img..."
-          original_size=$(du -h system.img | cut -f1)
-          
-          if command -v pigz &> /dev/null; then
-            echo "⚙️ 使用pigz进行多线程压缩..."
-            pigz -k -f -9 system.img
-          else
-            echo "⚙️ 使用gzip进行压缩..."
-            gzip -k -f -9 system.img
-          fi
-          
-          compressed_size=$(du -h system.img.gz | cut -f1)
-          echo "压缩后大小: $compressed_size" >> build_info.txt
-          
-          orig_bytes=$(stat -c%s system.img)
-          comp_bytes=$(stat -c%s system.img.gz)
-          ratio=$(echo "scale=2; (1 - $comp_bytes/$orig_bytes) * 100" | bc)
-          echo "压缩率: $ratio%" >> build_info.txt
-          
-          echo "✅ 压缩完成: ${original_size} → ${compressed_size} (节省 ${ratio}%)"
-          ls -lh system.img*
-        else
-          echo "ℹ️ 未找到system.img，跳过压缩"
-        fi
-    
-    - name: 创建发布包
-      if: ${{ success() }}
-      run: |
-        cd SGSI-build-tool/final_out
-        
-        if [ -z "$(ls -A .)" ]; then
-          echo "::error::❌ 无可用输出文件"
+        # 校验ROM文件
+        rom_path="tmp/${{ env.rom_name }}"
+        if [ ! -f "$rom_path" ]; then
+          echo "::error::ROM文件不存在: $rom_path"
           exit 1
         fi
         
+        min_rom_size=$((100*1024*1024)) # 100MB
+        rom_size=$(stat -c%s "$rom_path")
+        if [ $rom_size -lt $min_rom_size ]; then
+          echo "::error::ROM文件过小 (${rom_size}字节)，可能下载不完整"
+          exit 1
+        fi
+        echo "::endgroup::"
+        
+        echo "::group::执行make.sh构建"
+        # 设置资源限制
+        ulimit -v $((4096 * 1024))  # 限制内存使用
+        ionice -c 3 -p $$           # 降低IO优先级
+        
+        # 执行构建
+        build_log="build_${GITHUB_RUN_ID}.log"
+        
+        # 使用unbuffer确保实时输出 (如果可用)
+        if command -v unbuffer >/dev/null; then
+          unbuffer ./make.sh 2>&1 | tee "$build_log"
+        else
+          ./make.sh 2>&1 | tee "$build_log"
+        fi
+        
+        build_exit=${PIPESTATUS[0]}
+        if [ $build_exit -ne 0 ]; then
+          echo "::error::make.sh构建失败，退出码: $build_exit"
+          # 提取日志中的关键错误
+          grep -i -E "error|fail|critical|exception" "$build_log" || true
+          exit $build_exit
+        fi
+        
+        # 检查特定错误模式
+        if grep -q "sdat2img: failed" "$build_log"; then
+          echo "::error::sdat2img转换失败"
+          exit 1
+        fi
+        echo "::endgroup::"
+        
+        echo "::group::校验构建结果"
+        # 检查生成的镜像文件
+        if [ ! -f "out/system.img" ]; then
+          echo "::warning::system.img未生成，尝试手动创建"
+          
+          if [ ! -d "out/system" ]; then
+            echo "::error::out/system目录不存在，无法创建镜像"
+            exit 1
+          fi
+          
+          # 计算镜像大小
+          size_kb=$(du -sk out/system/ | cut -f1)
+          img_size_kb=$((size_kb * 130 / 100))  # +30%
+          img_size_mb=$((img_size_kb / 1024))
+          [ $img_size_mb -lt 512 ] && img_size_mb=512
+          
+          echo "创建 ${img_size_mb}MB 镜像"
+          ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 out/system.img ${img_size_mb}M
+          ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config -S out/config/system_file_contexts -f out/system/ -a /system out/system/system/ -a /system out/system.img
+        fi
+        
+        # 校验生成的镜像
+        if [ ! -f "out/system.img" ]; then
+          echo "::error::最终system.img不存在"
+          exit 1
+        fi
+        
+        min_img_size=$((300*1024*1024)) # 300MB
+        img_size=$(stat -c%s "out/system.img")
+        if [ $img_size -lt $min_img_size ]; then
+          echo "::error::生成的system.img过小 (${img_size}字节)，可能构建失败"
+          exit 1
+        fi
+        
+        # 移动生成的文件
+        mkdir -p SGSI
+        mv out/system.img SGSI/
+        echo "构建产物大小: $(du -sh SGSI/system.img)"
+        echo "::endgroup::"
+        cd ../../..
+
+    - name: 打包系统补丁
+      run: |
+        for i in 1 2 3; do
+          if [ -d "Patch/Patch$i" ]; then
+            echo "打包补丁 Patch$i"
+            zip -r -0 "Patch$i.zip" "Patch/Patch$i"/*
+            mkdir -p SGSI-build-tool/10/SGSI
+            mv "Patch$i.zip" SGSI-build-tool/10/SGSI/
+          fi
+        done
+
+    - name: 创建最终包
+      run: |
+        echo "::group::创建最终包"
+        # 确保SGSI目录存在
+        mkdir -p SGSI-build-tool/10/SGSI
+        
+        # 创建压缩包
+        pack_name="${{ env.pack_sgsi }}"
+        echo "创建压缩包: $pack_name"
+        
+        # 直接在工作区根目录创建压缩包
+        zip -r -0 "$pack_name" SGSI-build-tool/10/SGSI/*
+        
+        # 生成SHA256校验文件
+        sha256sum "$pack_name" > "${pack_name}.sha256"
+        
+        # 检查压缩包
+        if [ ! -f "$pack_name" ]; then
+          echo "::error::压缩包创建失败: $pack_name"
+          exit 1
+        fi
+        
+        echo "压缩包大小: $(du -sh "$pack_name" | cut -f1)"
+        echo "::endgroup::"
+        
+    - name: 准备上传文件
+      run: |
+        echo "::group::准备上传文件"
         pack_name="${{ env.pack_sgsi }}"
         
-        # 显示构建信息
-        if [ -f "build_info.txt" ]; then
-          echo "::group::📊 镜像压缩信息"
-          cat build_info.txt
-          echo "::endgroup::"
-          
-          orig_size=$(grep "原始大小" build_info.txt | cut -d: -f2 | xargs)
-          comp_size=$(grep "压缩后大小" build_info.txt | cut -d: -f2 | xargs)
-          ratio=$(grep "压缩率" build_info.txt | cut -d: -f2 | xargs)
-          
-          if [ -n "$orig_size" ] && [ -n "$comp_size" ]; then
-            echo "✅ 压缩结果: ${orig_size} → ${comp_size} (节省 $ratio)"
-          fi
-        fi
+        # 创建上传目录
+        mkdir -p upload
+        mv "$pack_name" upload/
+        mv "${pack_name}.sha256" upload/
         
-        # 打包文件
-        echo "📦 创建发布包: $pack_name"
-        zip -r -0 "../$pack_name" .
+        # 添加恢复说明
+        cat <<EOF > upload/RECOVERY_INSTRUCTIONS.txt
+        文件完整性校验:
+        sha256sum -c ${pack_name}.sha256
         
-        # 处理大文件分割
-        cd ..
-        file_size=$(stat -c%s "$pack_name")
-        max_size=1400000000  # 1.4GB
+        如果文件被分割：
+        1. 合并所有部分: cat ${pack_name}_part* > $pack_name
+        2. 验证完整性: sha256sum -c ${pack_name}.sha256
+        EOF
+        
+        # 检查文件大小
+        file_size=$(stat -c%s "upload/$pack_name")
+        max_size=1500000000  # 1.5GB
+        
+        echo "压缩包大小: $(numfmt --to=iec $file_size)"
         
         if [ $file_size -gt $max_size ]; then
-          echo "✂️ 分割大文件 (大小: $((file_size/1024/1024))MB)"
-          split -b 1000M -d "$pack_name" "${pack_name}_part"
-          rm "$pack_name"
-          packed_files=($(ls "${pack_name}"_part*))
-        else
-          packed_files=("$pack_name")
-          echo "ℹ️ 文件大小: $((file_size/1024/1024))MB，无需分割"
-        fi
-        
-        # 准备上传
-        mkdir -p ../upload
-        mv "${packed_files[@]}" ../upload/ || true
-        
-        # 设置上传文件路径
-        output_file=$(ls $PWD/../upload/$pack_name* | head -n1)
-        if [ -n "$output_file" ]; then
-          echo "📎 上传文件: $(basename "$output_file")"
-          echo "OUTPUT_FILE=$output_file" >> $GITHUB_ENV
-        else
-          echo "::error::❌ 未找到输出文件"
-          exit 1
-        fi
-    
-    - name: 发布GitHub版本
-      uses: softprops/action-gh-release@v1
-      with:
-        files: upload/*
-        tag_name: build-${{ github.run_number }}
-        generate_release_notes: true
-        body: |
-          构建 #${{ github.run_number }} 已完成！
+          echo "文件过大，进行分割..."
           
-          **关键信息**:
-          - ROM名称: ${{ env.rom_name }}
-          - ROM类型: ${{ env.rom_type || '无' }}
-          - 构建时间: ${{ steps.date.outputs.formattedDate }}
+          # 计算分割大小 (1.4GB)
+          split_size=1400m
           
-          ${{ env.upload_wetransfer == 'true' && '>  ️ **重要提示**：本构建包含WeTransfer下载链接（有效期7天），请在作业摘要中查看详情！' || '' }}
-    
-    - name: 上传构建产物
-      if: ${{ env.upload_artifact == 'true' }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: SGSI-build-output
-        path: upload/*
-        retention-days: 7
+          # 分割文件
+          cd upload
+          split -b $split_size -d "$pack_name" "${pack_name}_part"
+          rm "$pack_name"  # 删除原始文件，保留分割后的部分
+          
+          echo "分割完成，上传目录内容:"
+          ls -lh
+        else
+          echo "上传目录内容:"
+          ls -lh upload/
+        fi
+        echo "::endgroup::"
         
-    - name: 上传到WeTransfer
-      if: ${{ env.upload_wetransfer == 'true' }}
+    - name: 验证上传文件
       run: |
-        echo "☁️ 上传到WeTransfer..."
-        cd $GITHUB_WORKSPACE
-        
-        # 检查文件是否存在
-        if [ ! -f "$OUTPUT_FILE" ]; then
-          echo "::error::❌ 要上传的文件不存在: $OUTPUT_FILE"
+        echo "::group::验证上传文件"
+        if [ -z "$(ls -A upload)" ]; then
+          echo "::error::上传目录为空!"
           exit 1
-        fi
-        
-        # 获取文件大小信息
-        FILE_SIZE=$(du -h "$OUTPUT_FILE" | cut -f1)
-        echo "⬆️ 开始上传文件: $(basename "$OUTPUT_FILE") (大小: $FILE_SIZE)..."
-        
-        # 计算到期日期
-        EXPIRY_DATE=$(date -d "+7 days" "+%Y-%m-%d")
-        
-        # 上传并获取结果
-        curl -sL https://git.io/file-transfer | sh
-        TRANSFER_OUTPUT=$(./transfer wet "$OUTPUT_FILE")
-        echo "$TRANSFER_OUTPUT"
-        
-        # 提取下载链接
-        DOWNLOAD_LINK=$(echo "$TRANSFER_OUTPUT" | grep -o 'https://we.tl/[^ ]*' | head -n1)
-        if [ -n "$DOWNLOAD_LINK" ]; then
-          # 添加到工作流摘要（带有效期声明）
-          echo "##   WeTransfer 下载地址" >> $GITHUB_STEP_SUMMARY
-          echo ">   **链接有效期至 ${EXPIRY_DATE}**" >> $GITHUB_STEP_SUMMARY
-          echo "[点击下载]($DOWNLOAD_LINK)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "文件: $(basename "$OUTPUT_FILE")" >> $GITHUB_STEP_SUMMARY
-          echo "大小: $FILE_SIZE" >> $GITHUB_STEP_SUMMARY
-          
-          # 设置环境变量供后续步骤使用
-          echo "WETRANSFER_LINK=$DOWNLOAD_LINK" >> $GITHUB_ENV
-          echo "EXPIRY_DATE=$EXPIRY_DATE" >> $GITHUB_ENV
         else
-          echo "::warning::⚠️ 未找到下载链接"
-          echo "完整输出: $TRANSFER_OUTPUT" # 输出完整结果用于调试
-        fi
-    
-    - name: 显示最终摘要
-      if: always()
-      run: |
-        echo "✅ 构建流程已完成"
-        echo "::group::📊 构建摘要"
-        echo "ROM URL: ${{ env.rom_url }}"
-        echo "ROM名称: ${{ env.rom_name }}"
-        echo "ROM类型: ${{ env.rom_type }}"
-        echo "构建编号: ${{ github.run_number }}"
-        
-        # 镜像压缩信息
-        if [ -f "SGSI-build-tool/final_out/build_info.txt" ]; then
-          orig_size=$(grep "原始大小" SGSI-build-tool/final_out/build_info.txt | cut -d: -f2 | xargs)
-          comp_size=$(grep "压缩后大小" SGSI-build-tool/final_out/build_info.txt | cut -d: -f2 | xargs)
-          ratio=$(grep "压缩率" SGSI-build-tool/final_out/build_info.txt | cut -d: -f2 | xargs)
+          echo "上传文件列表 ($(ls upload | wc -l) 个文件):"
+          ls -lh upload
           
-          if [ -n "$orig_size" ] && [ -n "$comp_size" ]; then
-            echo "✨ 镜像大小对比: ${orig_size} → ${comp_size} (节省 ${ratio})"
+          # 尝试验证校验文件（如果未分割）
+          if [ ! -f "upload/${pack_name}_part00" ] && [ -f "upload/${pack_name}.sha256" ]; then
+            echo "尝试校验文件完整性..."
+            (cd upload && sha256sum -c "${pack_name}.sha256") || {
+              echo "::warning::文件校验失败，但继续执行"
+            }
           fi
         fi
-        
-        # WeTransfer链接信息
-        if [[ -n "$WETRANSFER_LINK" && -n "$EXPIRY_DATE" ]]; then
-          echo ""
-          echo "🌐 WeTransfer下载链接: $WETRANSFER_LINK"
-          echo "⏳ 链接有效期至: $EXPIRY_DATE"
-        fi
-        
         echo "::endgroup::"
+        
+    - name: 发送通知
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == 'success' ]; then
+          echo "::notice::构建成功! 版本号: ${{ github.run_number }}"
+        else
+          echo "::error::构建失败! 详情查看工作流运行"
+        fi
+          
+    - name: 发布SGSI版本
+      uses: ncipollo/release-action@v1.8.6
+      with:
+        artifacts: 'upload/*'
+        name: xiaoxinSGSI-ab-Android10-unpack
+        tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}
+        token: ${{ secrets.GITHUB_TOKEN }}
