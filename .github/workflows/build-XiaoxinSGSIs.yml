@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
@@ -24,16 +25,16 @@ jobs:
         # 从sgsi.json读取配置
         rom_url=$(jq -r '.rom_url' sgsi.json)
         rom_name=$(jq -r '.rom_name' sgsi.json)
-        pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
+        pack_sg极简风格si=$(jq -r '.pack_sgsi' sgsi.json)
         make_miui=$(jq -r '.make_miui' sgsi.json)
         make_flyme=$(jq -r '.make_flyme' sgsi.json)
         make_coloros=$(jq -r '.make_coloros' sgsi.json)
-        make_h2os=$(jq -r '.make_h2os' sgsi.json)
+        make_h2os=$(jq -r '.make_h2os' sg极简风格si.json)
         make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)
         make_zui=$(jq -r '.make_zui' sgsi.json)
         make_super=$(jq -r '.make_super' sgsi.json)
         
-        # 使用环境文件设置环境变量（解决set-output弃用问题）
+        # 使用环境文件设置环境变量
         echo "rom_url=$rom_url" >> $GITHUB_ENV
         echo "rom_name=$rom_name" >> $GITHUB_ENV
         echo "pack_sgsi=$pack_sgsi" >> $GITHUB_ENV
@@ -92,16 +93,27 @@ jobs:
           exit 1
         fi
         
-        # 设置执行权限
-        find SGSI-build-tool -type f -name "*.sh" -exec chmod +x {} \;
+        # 设置执行权限（彻底修复权限问题）
+        echo "设置脚本文件执行权限..."
+        find SGSI-build-tool -type f \( -name "*.sh" -o -name "*.py" -o -name "perl" \) -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
+        chmod +x SGSI-build-tool/10/fixbug/*.sh
+        
+        # 特别确保关键文件有权限
+        chmod +x SGSI-build-tool/10/make.sh
+        chmod +x SGSI-build-tool/10/setup.sh
+        chmod +x SGSI-build-tool/10/SGSI.sh
         
         # 初始化环境
         cd SGSI-build-tool/10
         ./setup.sh || true
         cd ../..
         
-    # 后续步骤保持不变，与之前相同
+        # 验证关键文件权限
+        echo "验证权限:"
+        ls -l SGSI-build-tool/10/make.sh
+        ls -l SGSI-build-tool/10/bin/*
+        
     - name: 磁盘空间监控
       run: |
         echo "::group::磁盘空间检查"
@@ -137,7 +149,7 @@ jobs:
           echo "下载中断，继续尝试..."
         done
 
-        if [ ! -f "$rom_path" ]; then
+        if [ ! -f "$极简风格rom_path" ]; then
           echo "::error::ROM文件下载失败"
           exit 1
         fi
@@ -203,20 +215,38 @@ jobs:
         set -euo pipefail  # 启用严格错误处理
         
         echo "::group::准备构建环境"
-        # 确保所有脚本文件有执行权限
+        # 确保所有脚本文件有执行权限（双重检查）
         find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
+        chmod +x SGSI-build-tool/10/fixbug/*.sh
+        
+        # 特别确保make.sh有权限
+        if [ ! -x "SGSI-build-tool/10/make.sh" ]; then
+            echo "修复make.sh权限..."
+            chmod +x SGSI-build-tool/10/make.sh
+        fi
+        
+        # 验证关键文件权限
+        echo "关键文件权限状态:"
+        ls -l SGSI-build-tool/10/make.sh
+        ls -l SGSI-build-tool/10/bin/*
         
         # 移除权限相关命令
         find SGSI-build-tool/10 -type f -exec sed -i '/chown/d' {} \;
         
         # 准备构建文件
         rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh}
-        mv make/* SGSI-build-tool/10/
-        mv bin/* SGSI-build-tool/10/bin/
+        if [ -d "make" ] && [ -n "$(ls make)" ]; then
+            mv make/* SGSI-build-tool/10/
+        fi
+        if [ -d "bin" ] && [ -n "$(ls bin)" ]; then
+            mv bin/* SGSI-build-tool/10/bin/
+        fi
+        
+        # 进入构建目录
+        cd SGSI-build-tool/10
         
         # 创建输出目录结构
-        cd SGSI-build-tool/10
         mkdir -p out/{system,config}
         mkdir -p out/system/{bin,etc,lib,usr,framework,app,priv-app,vendor}
         
@@ -239,6 +269,14 @@ jobs:
             echo "::error::关键文件缺失: $file"
             exit 1
           fi
+          
+          # 确保文件可执行
+          if [[ "$file" == *.sh || "$file" == bin/* ]]; then
+            if [ ! -x "$file" ]; then
+              echo "修复 $file 权限..."
+              chmod +x "$file"
+            fi
+          fi
         done
         
         # 校验ROM文件
@@ -257,6 +295,16 @@ jobs:
         echo "::endgroup::"
         
         echo "::group::执行make.sh构建"
+        # 验证make.sh权限
+        if [ ! -x "make.sh" ]; then
+            echo "::warning::make.sh缺少执行权限，尝试修复..."
+            chmod +x make.sh
+            if [ ! -x "make.sh" ]; then
+                echo "::error::无法修复make.sh权限"
+                exit 126
+            fi
+        fi
+        
         # 设置资源限制
         ulimit -v $((4096 * 1024))  # 限制内存使用
         ionice -c 3 -p $$           # 降低IO优先级
@@ -264,14 +312,14 @@ jobs:
         # 执行构建
         build_log="build_${GITHUB_RUN_ID}.log"
         
-        # 使用unbuffer确保实时输出 (如果可用)
-        if command -v unbuffer >/dev/null; then
-          unbuffer ./make.sh 2>&1 | tee "$build_log"
+        # 使用script命令确保实时输出
+        if command -v script >/dev/null; then
+          script -q -c "./make.sh" "$build_log"
         else
           ./make.sh 2>&1 | tee "$build_log"
         fi
         
-        build_exit=${PIPESTATUS[0]}
+        build_exit=$?
         if [ $build_exit -ne 0 ]; then
           echo "::error::make.sh构建失败，退出码: $build_exit"
           # 提取日志中的关键错误
@@ -308,7 +356,7 @@ jobs:
         fi
         
         # 校验生成的镜像
-        if极简风格 [ ! -f "out/system.img" ]; then
+        if [ ! -f "out/system.img" ]; then
           echo "::error::最终system.img不存在"
           exit 1
         fi
@@ -329,7 +377,7 @@ jobs:
 
     - name: 打包系统补丁
       run: |
-        for i in 极简风格1 2 3; do
+        for i in 1 2 3; do
           if [ -d "Patch/Patch$i" ]; then
             echo "打包补丁 Patch$i"
             zip -r -0 "Patch$i.zip" "Patch/Patch$i"/*
