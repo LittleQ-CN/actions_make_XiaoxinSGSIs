@@ -25,11 +25,11 @@ jobs:
         # 从sgsi.json读取配置
         rom_url=$(jq -r '.rom_url' sgsi.json)
         rom_name=$(jq -r '.rom_name' sgsi.json)
-        pack_sg极简风格si=$(jq -r '.pack_sgsi' sgsi.json)
+        pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
         make_miui=$(jq -r '.make_miui' sgsi.json)
         make_flyme=$(jq -r '.make_flyme' sgsi.json)
         make_coloros=$(jq -r '.make_coloros' sgsi.json)
-        make_h2os=$(jq -r '.make_h2os' sg极简风格si.json)
+        make_h2os=$(jq -r '.make_h2os' sgsi.json)
         make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)
         make_zui=$(jq -r '.make_zui' sgsi.json)
         make_super=$(jq -r '.make_super' sgsi.json)
@@ -149,7 +149,7 @@ jobs:
           echo "下载中断，继续尝试..."
         done
 
-        if [ ! -f "$极简风格rom_path" ]; then
+        if [ ! -f "$rom_path" ]; then
           echo "::error::ROM文件下载失败"
           exit 1
         fi
