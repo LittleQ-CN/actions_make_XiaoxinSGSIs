@@ -47,25 +47,40 @@ jobs:
         
     - name: 下载构建工具
       run: |
-        # 使用curl静默下载并重试
-        max_retries=3
+        # 使用原始GitHub链接下载
+        tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
+        
+        # 下载并重试机制
+        max_retries=5
         for i in $(seq 1 $max_retries); do
           echo "尝试下载构建工具 (第 $i 次)"
           if command -v curl &> /dev/null; then
-            curl -fL -o SGSI-build-tool.tar https://ghproxy.com/https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar && break
+            curl -fL -o SGSI-build-tool.tar "$tool_url" && break
           else
-            wget -c -O SGSI-build-tool.tar https://ghproxy.com/https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar && break
+            wget -c -O SGSI-build-tool.tar "$tool_url" && break
           fi
-          sleep 5
+          sleep 10
+          echo "下载中断，继续尝试..."
         done
         
+        # 如果原始链接失败，尝试备用源
         if [ ! -f SGSI-build-tool.tar ]; then
-          # 尝试备用源
-          curl -fL -o SGSI-build-tool.tar https://hub.yzuu.cf/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar || {
-            echo "::error::工具包下载失败"
-            exit 1
-          }
+          echo "原始链接下载失败，尝试备用源..."
+          alt_url="https://hub.yzuu.cf/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
+          if command -v curl &> /dev/null; then
+            curl -fL -o SGSI-build-tool.tar "$alt_url" || {
+              echo "::error::工具包下载失败"
+              exit 1
+            }
+          else
+            wget -c -O SGSI-build-tool.tar "$alt_url" || {
+              echo "::error::工具包下载失败"
+              exit 1
+            }
+          fi
         fi
+        
+        echo "下载成功！文件大小: $(du -sh SGSI-build-tool.tar | cut -f1)"
         
     - name: 设置构建环境
       run: |
@@ -86,6 +101,7 @@ jobs:
         ./setup.sh || true
         cd ../..
         
+    # 后续步骤保持不变，与之前相同
     - name: 磁盘空间监控
       run: |
         echo "::group::磁盘空间检查"
@@ -288,11 +304,11 @@ jobs:
           
           echo "创建 ${img_size_mb}MB 镜像"
           ./bin/mke2fs -t ext4 -L /system -b 4096 -m 0 out/system.img ${img_size_mb}M
-          ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config -S out/config/system_file_contexts -f out/system/ -a /system out/system/system/ -a /system out/system.img
+          ./bin/e2fsdroid -e -T 1230768000 -C out/config/system_fs_config -S out/config/system_file_contexts -f out/system/ -a /system out/system.img
         fi
         
         # 校验生成的镜像
-        if [ ! -f "out/system.img" ]; then
+        if极简风格 [ ! -f "out/system.img" ]; then
           echo "::error::最终system.img不存在"
           exit 1
         fi
@@ -313,7 +329,7 @@ jobs:
 
     - name: 打包系统补丁
       run: |
-        for i in 1 2 3; do
+        for i in 极简风格1 2 3; do
           if [ -d "Patch/Patch$i" ]; then
             echo "打包补丁 Patch$i"
             zip -r -0 "Patch$i.zip" "Patch/Patch$i"/*
