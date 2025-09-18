@@ -104,6 +104,11 @@ jobs:
         chmod +x SGSI-build-tool/10/setup.sh
         chmod +x SGSI-build-tool/10/SGSI.sh
         
+        # 移除所有脚本中的交互式read命令（关键修复）
+        echo "移除交互式read命令..."
+        find SGSI-build-tool -type f -name "*.sh" -exec sed -i '/read -p/d' {} \;
+        find SGSI-build-tool -type f -name "*.sh" -exec sed -i 's/^\s*read\s.*//g' {} \;
+        
         # 初始化环境
         cd SGSI-build-tool/10
         ./setup.sh || true
@@ -245,6 +250,11 @@ jobs:
         
         # 进入构建目录
         cd SGSI-build-tool/10
+        
+        # 移除交互式命令（确保无等待）
+        echo "再次移除交互式命令..."
+        find . -type f -name "*.sh" -exec sed -i '/read -p/d' {} \;
+        find . -type f -name "*.sh" -exec sed -i 's/^\s*read\s.*//g' {} \;
         
         # 创建输出目录结构
         mkdir -p out/{system,config}
