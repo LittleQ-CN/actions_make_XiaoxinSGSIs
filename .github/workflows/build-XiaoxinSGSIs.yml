@@ -1,4 +1,3 @@
-
 name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
@@ -93,7 +92,7 @@ jobs:
           exit 1
         fi
         
-        # 设置执行权限（彻底修复权限问题）
+        # 设置执行权限
         echo "设置脚本文件执行权限..."
         find SGSI-build-tool -type f \( -name "*.sh" -o -name "*.py" -o -name "perl" \) -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
@@ -104,10 +103,14 @@ jobs:
         chmod +x SGSI-build-tool/10/setup.sh
         chmod +x SGSI-build-tool/10/SGSI.sh
         
-        # 移除所有脚本中的交互式read命令（关键修复）
+        # 移除所有脚本中的交互式read命令
         echo "移除交互式read命令..."
         find SGSI-build-tool -type f -name "*.sh" -exec sed -i '/read -p/d' {} \;
         find SGSI-build-tool -type f -name "*.sh" -exec sed -i 's/^\s*read\s.*//g' {} \;
+        
+        # 修复set-output弃用警告
+        echo "更新弃用的set-output命令..."
+        find SGSI-build-tool -type f -name "*.sh" -exec sed -i 's/echo "::set-output name=\(.*\)::\(.*\)"/echo "\1=\2" >> $GITHUB_OUTPUT/g' {} \;
         
         # 初始化环境
         cd SGSI-build-tool/10
@@ -217,10 +220,10 @@ jobs:
     - name: 构建SGSI系统镜像
       timeout-minutes: 120
       run: |
-        set -euo pipefail  # 启用严格错误处理
+        set -euo pipefail
         
         echo "::group::准备构建环境"
-        # 确保所有脚本文件有执行权限（双重检查）
+        # 确保所有脚本文件有执行权限
         find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
         chmod +x SGSI-build-tool/10/bin/*
         chmod +x SGSI-build-tool/10/fixbug/*.sh
@@ -230,11 +233,6 @@ jobs:
             echo "修复make.sh权限..."
             chmod +x SGSI-build-tool/10/make.sh
         fi
-        
-        # 验证关键文件权限
-        echo "关键文件权限状态:"
-        ls -l SGSI-build-tool/10/make.sh
-        ls -l SGSI-build-tool/10/bin/*
         
         # 移除权限相关命令
         find SGSI-build-tool/10 -type f -exec sed -i '/chown/d' {} \;
@@ -251,10 +249,14 @@ jobs:
         # 进入构建目录
         cd SGSI-build-tool/10
         
-        # 移除交互式命令（确保无等待）
+        # 移除交互式命令
         echo "再次移除交互式命令..."
         find . -type f -name "*.sh" -exec sed -i '/read -p/d' {} \;
         find . -type f -name "*.sh" -exec sed -i 's/^\s*read\s.*//g' {} \;
+        
+        # 修复set-output弃用警告
+        echo "再次更新弃用的set-output命令..."
+        find . -type f -name "*.sh" -exec sed -i 's/echo "::set-output name=\(.*\)::\(.*\)"/echo "\1=\2" >> $GITHUB_OUTPUT/g' {} \;
         
         # 创建输出目录结构
         mkdir -p out/{system,config}
@@ -383,8 +385,147 @@ jobs:
         mv out/system.img SGSI/
         echo "构建产物大小: $(du -sh SGSI/system.img)"
         echo "::endgroup::"
-        cd ../../..
-
+        
+        cd ../..
+        
+    # 检查构建输出文件
+    - name: 检查构建输出文件
+      run: |
+        echo "::group::构建输出检查"
+        cd SGSI-build-tool/10/SGSI
+        
+        # 列出输出目录内容
+        echo "构建输出内容:"
+        ls -lh
+        
+        # 检查实际生成的文件
+        output_file=$(ls -1)
+        if [ -z "$output_file" ]; then
+          echo "::error::未生成任何构建输出文件"
+          exit 1
+        fi
+        
+        # 如果只有一个文件，则将其作为主镜像文件
+        if [ $(ls | wc -l) -eq 1 ]; then
+          main_file=$output_file
+          file_type=$(file -b "$main_file")
+          echo "检测到输出文件: $main_file, 类型: $file_type"
+          
+          # 处理压缩包
+          if echo "$file_type" | grep -q 'archive\|compressed'; then
+            echo "检测到压缩文件, 尝试解压..."
+            case "$file_type" in
+              *Zip*|*ZIP*)
+                unzip "$main_file"
+                rm "$main_file"
+                ;;
+              *gzip*|*GZIP*)
+                mv "$main_file" "$main_file.gz"
+                gzip -d "$main_file.gz"
+                ;;
+              *XZ*)
+                mv "$main_file" "$main_file.xz"
+                xz -d "$main_file.xz"
+                ;;
+              *)
+                echo "::error::未知压缩格式: $file_type"
+                exit 1
+                ;;
+            esac
+            # 重新检查解压后的文件
+            main_file=$(ls -1 | head -1)
+          fi
+          
+          # 处理稀疏镜像
+          if file -b "$main_file" | grep -q 'Android sparse image'; then
+            echo "检测到Android稀疏镜像, 转换为原始镜像..."
+            mv "$main_file" "${main_file}.sparse"
+            ./../../bin/simg2img "${main_file}.sparse" "$main_file"
+            if [ $? -ne 0 ]; then
+              echo "::error::稀疏镜像转换失败"
+              exit 1
+            fi
+            rm "${main_file}.sparse"
+          fi
+          
+          # 重命名为标准名称
+          if [ "$main_file" != "system [ "$main_file" != "system.img" ]; then
+            mv "$main_file" system.img
+          fi
+        else
+          # 如果多个文件，尝试寻找system.img
+          if [ -f "system.img" ]; then
+            echo "已找到system.img文件"
+          else
+            echo "::error::输出目录包含多个文件但未找到system.img"
+            ls -lh
+            exit 1
+          fi
+        fi
+        
+        # 最终验证system.img
+        if [ ! -f "system.img" ]; then
+          echo "::error::system.img不存在"
+          exit 1
+        fi
+        
+        # 验证镜像格式
+        img_type=$(file -b system.img)
+        echo "镜像最终类型: $img_type"
+        
+        # 检查文件系统类型
+        if ! echo "$img_type" | grep -qE 'ext4 filesystem|Linux rev 1.0 ext4 filesystem'; then
+          echo "::warning::镜像格式不符合预期"
+          
+          # 尝试挂载验证
+          mkdir -p mount_test
+          if sudo mount -o ro,loop system.img mount_test 2>/dev/null; then
+            echo "镜像挂载成功, 验证通过"
+            sudo umount mount_test
+          else
+            echo "::error::镜像格式验证失败，无法挂载"
+            exit 1
+          fi
+        fi
+        
+        echo "镜像验证通过"
+        echo "::endgroup::"
+        
+    # 新增步骤：压缩system.img
+    - name: 压缩系统镜像
+      run: |
+        echo "::group::压缩system.img"
+        cd SGSI-build-tool/10/SGSI
+        
+        # 记录原始大小
+        original_size=$(du -sh system.img | cut -f1)
+        echo "原始大小: $original_size"
+        
+        # 使用gzip进行压缩（保留原始文件的时间戳）
+        echo "开始压缩..."
+        gzip -9 -k -v system.img
+        
+        if [ ! -f "system.img.gz" ]; then
+          echo "::error::压缩失败，未生成system.img.gz"
+          exit 1
+        fi
+        
+        # 记录压缩后大小
+        compressed_size=$(du -sh system.img.gz | cut -f1)
+        echo "压缩后大小: $compressed_size"
+        
+        # 计算压缩率
+        original_bytes=$(stat -c%s "system.img")
+        compressed_bytes=$(stat -c%s "system.img.gz")
+        compression_rate=$(echo "scale=2; (1 - $compressed_bytes/$original_bytes)*100" | bc)
+        echo "压缩率: ${compression_rate}%"
+        
+        # 删除原始镜像（保留压缩版本）
+        rm -f system.img
+        
+        echo "压缩完成"
+        echo "::endgroup::"
+        
     - name: 打包系统补丁
       run: |
         for i in 1 2 3; do
@@ -433,25 +574,32 @@ jobs:
         
         # 添加恢复说明
         cat <<EOF > upload/RECOVERY_INSTRUCTIONS.txt
-        文件完整性校验:
+        # 文件恢复说明
+        
+        ## 文件完整性校验:
         sha256sum -c ${pack_name}.sha256
         
-        如果文件被分割：
+        ## 如果文件被分割：
         1. 合并所有部分: cat ${pack_name}_part* > $pack_name
         2. 验证完整性: sha256sum -c ${pack_name}.sha256
+        
+        ## 镜像恢复：
+        1. 解压ZIP包
+        2. 解压镜像: gunzip system.img.gz
+        3. 刷入镜像: fastboot flash system system.img
         EOF
         
         # 检查文件大小
         file_size=$(stat -c%s "upload/$pack_name")
-        max_size=1500000000  # 1.5GB
+        max_size=1600000000  # 1.6GB (新的上传限制)
         
         echo "压缩包大小: $(numfmt --to=iec $file_size)"
         
         if [ $file_size -gt $max_size ]; then
-          echo "文件过大，进行分割..."
+          echo "文件超过1.6GB，进行分割..."
           
-          # 计算分割大小 (1.4GB)
-          split_size=1400m
+          # 计算分割大小 (1.5GB)
+          split_size=1500m
           
           # 分割文件
           cd upload
