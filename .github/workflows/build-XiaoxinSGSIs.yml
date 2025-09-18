@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
@@ -102,23 +103,24 @@ jobs:
           exit 1
         fi
         
-        # 修复1: 清理可能存在的文件
-        rm -rf SGSI-build-tool/10/bin/*
+        # 关键修复：只删除需要替换的文件，不删除整个bin目录
+        rm -f SGSI-build-tool/10/bin/brotli
+        rm -f SGSI-build-tool/10/bin/sdat2img.py
+        rm -f SGSI-build-tool/10/bin/simg2img
+        rm -f SGSI-build-tool/10/bin/img2simg
         
-        # 修复2: 复制所有其他文件
-        cp -r SGSI-build-tool/10/bin-orig/* SGSI-build-tool/10/bin/
+        # 创建指向系统工具的符号链接
+        ln -s $(which brotli) SGSI-build-tool/10/bin/brotli
+        ln -s $(which img2simg) SGSI-build-tool/10/bin/img2simg
+        ln -s $(which simg2img) SGSI-build-tool/10/bin/simg2img
+        ln -s $(which sdat2img) SGSI-build-tool/10/bin/sdat2img.py
         
-        # 修复3: 创建指向系统工具的符号链接
-        ln -sf $(which brotli) SGSI-build-tool/10/bin/brotli
-        ln -sf $(which img2simg) SGSI-build-tool/10/bin/img2simg
-        ln -sf $(which simg2img) SGSI-build-tool/10/bin/simg2img
-        ln -sf $(which sdat2img) SGSI-build-tool/10/bin/sdat2img.py
-        
-        # 修复4: 脚本修复
+        # 脚本修复
         sed -i 's/\[ .* = \]/[ -n /g' SGSI-build-tool/10/SGSI.sh
         sed -i 's/ = \]/ ]/g' SGSI-build-tool/10/SGSI.sh
         sed -i '/chown/d' SGSI-build-tool/10/setup.sh
         sed -i 's|./bin/brotli|brotli|g' SGSI-build-tool/10/make.sh
+        sed -i 's|./bin/simg2img|simg2img|g' SGSI-build-tool/10/make.sh
         
         # 设置执行权限
         echo "设置脚本文件执行权限..."
@@ -243,6 +245,12 @@ jobs:
     - name: 开始构建
       run: |
         cd SGSI-build-tool/10
+        # 添加调试信息
+        echo "当前工作目录: $(pwd)"
+        echo "文件列表:"
+        ls -l
+        
+        # 运行构建脚本
         ./make.sh || true
         
         # 如果构建失败，显示错误日志
@@ -252,15 +260,18 @@ jobs:
           exit 1
         fi
         
-        ls -l ./out/
+        # 确保输出目录存在
+        mkdir -p out
+        ls -l out/
         
         # 创建上传目录
         mkdir -p ../../upload
-        mv ./out/* ../../upload/ || true
+        mv out/* ../../upload/ || true
         
     - name: 清理工作空间
       run: |
         # 保留必要的构建结果
+        mkdir -p upload
         mv SGSI-build-tool/10/tmp/${{ env.rom_name }} upload/ || true
         mv SGSI-build-tool/10/out/* upload/ || true
         
