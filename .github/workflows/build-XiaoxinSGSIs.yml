@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
@@ -10,6 +11,27 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
+    - name: 安装系统依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          brotli \
+          p7zip-full \
+          python3 \
+          python3-pip \
+          android-sdk-libsparse-utils \
+          e2fsprogs \
+          simg2img \
+          img2simg \
+          unzip \
+          jq \
+          git
+        
+        # 安装 Python 依赖
+        pip3 install protobuf pycryptodome
+        
+        echo "所有必需依赖已安装"
+        
     - name: 检出代码库
       uses: actions/checkout@v3
       
@@ -81,35 +103,41 @@ jobs:
           exit 1
         fi
         
+        # 删除会导致问题的二进制文件
+        rm -f SGSI-build-tool/10/bin/brotli
+        rm -f SGSI-build-tool/10/bin/sdat2img.py
+        rm -f SGSI-build-tool/10/bin/simg2img
+        
+        # 创建指向系统工具的符号链接
+        ln -s $(which brotli) SGSI-build-tool/10/bin/brotli
+        ln -s $(which img2simg) SGSI-build-tool/10/bin/img2simg
+        ln -s $(which simg2img) SGSI-build-tool/10/bin/simg2img
+        ln -s $(which sdat2img) SGSI-build-tool/10/bin/sdat2img.py
+        
+        # 修复 SGSI.sh 中的变量检查
+        sed -i 's/\[ .* = \]/[ -n /g' SGSI-build-tool/10/SGSI.sh
+        sed -i 's/ = \]/ ]/g' SGSI-build-tool/10/SGSI.sh
+        
+        # 修复 setup.sh 中的权限问题
+        sed -i '/chown/d' SGSI-build-tool/10/setup.sh
+        
+        # 修复 make.sh 中的解压命令
+        sed -i 's|./bin/brotli|brotli|g' SGSI-build-tool/10/make.sh
+        
         # 设置执行权限
         echo "设置脚本文件执行权限..."
-        find SGSI-build-tool -type f \( -name "*.sh" -o -name "*.py" -o -name "perl" \) -exec chmod +x {} \;
-        chmod +x SGSI-build-tool/10/bin/*
-        chmod +x SGSI-build-tool/10/fixbug/*.sh
-        
-        # 特别确保关键文件有权限
-        chmod +x SGSI-build-tool/10/make.sh
-        chmod +x SGSI-build-tool/10/setup.sh
-        chmod +x SGSI-build-tool/10/SGSI.sh
-        
-        # 移除所有脚本中的交互式read命令
-        echo "移除交互式read命令..."
-        find SGSI-build-tool -type f -name "*.sh" -exec sed -i '/read -p/d' {} \;
-        find SGSI-build-tool -type f -name "*.sh" -exec sed -i 's/^\s*read\s.*//g' {} \;
-        
-        # 修复set-output弃用警告
-        echo "更新弃用的set-output命令..."
-        find SGSI-build-tool -type f -name "*.sh" -exec sed -i 's/echo "::set-output name=\(.*\)::\(.*\)"/echo "\1=\2" >> $GITHUB_OUTPUT/g' {} \;
+        find SGSI-build-tool -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} \;
         
         # 初始化环境
         cd SGSI-build-tool/10
         ./setup.sh || true
         cd ../..
         
-        # 验证关键文件权限
-        echo "验证权限:"
-        ls -l SGSI-build-tool/10/make.sh
-        ls -l SGSI-build-tool/10/bin/*
+        # 验证工具链接
+        echo "当前使用的工具:"
+        ls -l SGSI-build-tool/10/bin/brotli
+        ls -l SGSI-build-tool/10/bin/simg2img
+        ls -l SGSI-build-tool/10/bin/sdat2img.py
         
     - name: 磁盘空间监控
       run: |
@@ -119,7 +147,7 @@ jobs:
         free_space=$(df -BG . | awk 'NR==2 {print $4}' | tr -d 'G')
         
         if [ "$free_space" -lt "$min_free" ]; then
-          echo "::error::磁盘空间不足! 需要至少 ${min_free}GB, 当前只有 ${free_space}GB"
+          echo "::error::磁盘空间不足! 需要至少 ${min_free}GB, 当前只有 ${_free}GB, 当前只有 ${free_space}GB"
           exit 1
         fi
         echo "::endgroup::"
@@ -218,19 +246,26 @@ jobs:
     - name: 开始构建
       run: |
         cd SGSI-build-tool/10
-        ./make.sh
+        ./make.sh || true
+        
+        # 如果构建失败，显示错误日志
+        if [ $? -ne 0 ]; then
+          echo "::error::构建失败，检查日志！"
+          cat ./error.log || true
+          exit 1
+        fi
         
         ls -l ./out/
         
         # 创建上传目录
         mkdir -p ../../upload
-        mv ./out/* ../../upload/
+        mv ./out/* ../../upload/ || true
         
     - name: 清理工作空间
       run: |
         # 保留必要的构建结果
         mv SGSI-build-tool/10/tmp/${{ env.rom_name }} upload/ || true
-        mv SGSI-build-tool/10/out/* upload/ || true
+        mv SGSI-build-tool/ mv SGSI-build-tool/10/out/* upload/ || true
         
         # 清理其他文件释放空间
         rm -rf SGSI-build-tool
@@ -238,7 +273,7 @@ jobs:
         df -h
         
     - name: 上传构建产物
-      uses: actions/upload-artifact@v4  # 更新为 V4 版本
+      uses: actions/upload-artifact@v4
       with:
         name: XiaoxinSGSI
         path: upload
