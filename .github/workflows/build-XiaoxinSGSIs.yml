@@ -1,4 +1,3 @@
-
 name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
@@ -25,7 +24,8 @@ jobs:
           img2simg \
           unzip \
           jq \
-          git
+          git \
+          file
         
         # 安装 Python 依赖
         pip3 install protobuf pycryptodome
@@ -33,7 +33,7 @@ jobs:
         echo "所有必需依赖已安装"
         
     - name: 检出代码库
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       
     - name: 清理工作区
       run: |
@@ -103,27 +103,41 @@ jobs:
           exit 1
         fi
         
-        # 关键修复：只删除需要替换的文件，不删除整个bin目录
-        rm -f SGSI-build-tool/10/bin/brotli
-        rm -f SGSI-build-tool/10/bin/sdat2img.py
-        rm -f SGSI-build-tool/10/bin/simg2img
-        rm -f SGSI-build-tool/10/bin/img2simg
+        # 关键修复1: 完全移除bin目录并使用系统工具
+        rm -rf SGSI-build-tool/10/bin
+        mkdir -p SGSI-build-tool/10/bin
         
-        # 创建指向系统工具的符号链接
-        ln -s $(which brotli) SGSI-build-tool/10/bin/brotli
-        ln -s $(which img2simg) SGSI-build-tool/10/bin/img2simg
-        ln -s $(which simg2img) SGSI-build-tool/10/bin/simg2img
-        ln -s $(which sdat2img) SGSI-build-tool/10/bin/sdat2img.py
+        # 关键修复2: 全局替换脚本中的工具调用
+        find SGSI-build-tool/10 -type f -exec sed -i '
+          s|\./bin/brotli|brotli|g;
+          s|bin/sdat2img\.py|sdat2img|g;
+          s|\./bin/simg2img|simg2img|g;
+        ' {} \;
         
-        # 脚本修复
-        sed -i 's/\[ .* = \]/[ -n /g' SGSI-build-tool/10/SGSI.sh
-        sed -i 's/ = \]/ ]/g' SGSI-build-tool/10/SGSI.sh
-        sed -i '/chown/d' SGSI-build-tool/10/setup.sh
-        sed -i 's|./bin/brotli|brotli|g' SGSI-build-tool/10/make.sh
-        sed -i 's|./bin/simg2img|simg2img|g' SGSI-build-tool/10/make.sh
+        # 关键修复3: 修复脚本语法错误
+        sed -i '
+          8s/\[ \$MAKETYPE = \]/[ -z "$MAKETYPE" ]/g;
+          11s/\[ \$INSTALL_TYPE = \]/[ -z "$INSTALL_TYPE" ]/g;
+        ' SGSI-build-tool/10/SGSI.sh
+        
+        # 关键修复4: 移除所有chown调用
+        find SGSI-build-tool/10 -type f -exec sed -i '/chown/d' {} \;
+        
+        # 关键修复5: 添加工具检查
+        echo "#!/bin/bash" > SGSI-build-tool/10/bin/brotli
+        echo "command -v brotli >/dev/null || { echo >&2 'brotli未安装'; exit 127; }" >> SGSI-build-tool/10/bin/brotli
+        echo 'exec brotli "$@"' >> SGSI-build-tool/10/bin/brotli
+        
+        echo "#!/bin/bash" > SGSI-build-tool/10/bin/sdat2img
+        echo "command -v sdat2img >/dev/null || { echo >&2 'sdat2img未安装'; exit 127; }" >> SGSI-build-tool/10/bin/sdat2img
+        echo 'exec sdat2img "$@"' >> SGSI-build-tool/10/bin/sdat2img
+        
+        echo "#!/bin/bash" > SGSI-build-tool/10/bin/simg2img
+        echo "command -v simg2img >/dev/null || { echo >&2 'simg2img未安装'; exit 127; }" >> SGSI-build-tool/10/bin/simg2img
+        echo 'exec simg2img "$@"' >> SGSI-build-tool/10/bin/simg2img
         
         # 设置执行权限
-        echo "设置脚本文件执行权限..."
+        chmod +x SGSI-build-tool/10/bin/*
         find SGSI-build-tool -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} \;
         
         # 初始化环境
@@ -131,12 +145,13 @@ jobs:
         ./setup.sh || true
         cd ../..
         
-        # 验证工具链接
-        echo "当前使用的工具:"
-        ls -l SGSI-build-tool/10/bin/brotli
-        ls -l SGSI-build-tool/10/bin/img2simg
-        ls -l SGSI-build-tool/10/bin/simg2img
-        ls -l SGSI-build-tool/10/bin/sdat2img.py
+        # 验证工具可用性
+        echo "系统brotli路径: $(which brotli)"
+        echo "系统brotli信息:"
+        file $(which brotli)
+        brotli --version
+        
+        echo "系统sdat2img路径: $(which sdat2img)"
         
     - name: 磁盘空间监控
       run: |
@@ -245,10 +260,18 @@ jobs:
     - name: 开始构建
       run: |
         cd SGSI-build-tool/10
-        # 添加调试信息
+        
+        # 添加调试输出
         echo "当前工作目录: $(pwd)"
         echo "文件列表:"
         ls -l
+        
+        # 验证工具
+        echo "验证brotli调用:"
+        ./bin/brotli --version || true
+        
+        echo "验证sdat2img调用:"
+        ./bin/sdat2img --help || true
         
         # 运行构建脚本
         ./make.sh || true
