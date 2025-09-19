@@ -25,7 +25,8 @@ jobs:
           unzip \
           jq \
           git \
-          file
+          file \
+          tree
         
         # 安装 Python 依赖
         pip3 install protobuf pycryptodome
@@ -140,18 +141,22 @@ jobs:
         chmod +x SGSI-build-tool/10/bin/*
         find SGSI-build-tool -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} \;
         
-        # 初始化环境
+    - name: 初始化环境
+      run: |
+        # 移除原有的setup.sh并使用自定义版本
+        rm -f SGSI-build-tool/10/setup.sh
+        mv bin/setup.sh SGSI-build-tool/10/
+        
         cd SGSI-build-tool/10
-        ./setup.sh || true
+        echo "::group::运行环境初始化脚本"
+        sudo bash setup.sh || true
+        echo "::endgroup::"
+        
+        # 验证初始化结果
+        echo "初始化后目录内容:"
+        ls -l
+        
         cd ../..
-        
-        # 验证工具可用性
-        echo "系统brotli路径: $(which brotli)"
-        echo "系统brotli信息:"
-        file $(which brotli)
-        brotli --version
-        
-        echo "系统sdat2img路径: $(which sdat2img)"
         
     - name: 磁盘空间监控
       run: |
@@ -200,7 +205,57 @@ jobs:
           echo "::error::ROM文件过小 (${file_size}字节)，可能不完整"
           exit 1
         fi
+        
+        echo "ROM文件下载成功！大小: $(du -sh "$rom_path" | cut -f1)"
     
+    - name: 验证工具和解压ROM包
+      run: |
+        cd SGSI-build-tool/10
+        
+        # 验证工具可用性
+        echo "::group::验证工具"
+        echo "系统brotli路径: $(which brotli)"
+        echo "系统brotli信息:"
+        file $(which brotli)
+        brotli --version
+        
+        echo "系统sdat2img路径: $(which sdat2img)"
+        sdat2img --help || true
+        
+        echo "系统simg2img路径: $(which simg2img)"
+        simg2img --version || true
+        echo "::endgroup::"
+        
+        # 验证ROM文件存在
+        echo "::group::ROM文件验证"
+        echo "ROM文件路径: tmp/${{ env.rom_name }}"
+        ls -lh tmp/
+        echo "::endgroup::"
+        
+        # 预解压ROM包进行验证
+        echo "::group::预解压ROM包"
+        mkdir -p tmp/unpack-test
+        unzip -t "tmp/${{ env.rom_name }}" -d tmp/unpack-test || true
+        
+        echo "解压后文件列表:"
+        tree -L 2 tmp/unpack-test || ls -lR tmp/unpack-test
+        
+        # 检查关键文件是否存在
+        critical_files=("system.new.dat.br" "system.new.br" "system.img" "vendor.new.dat.br" "vendor.new.br" "vendor.img")
+        for file in "${critical_files[@]}"; do
+          if find tmp/unpack-test -name "$file" | grep -q .; then
+            echo "✅ 找到关键文件: $file"
+          else
+            echo "⚠️ 未找到关键文件: $file"
+          fi
+        done
+        
+        # 清理测试目录
+        rm -rf tmp/unpack-test
+        echo "::endgroup::"
+        
+        cd ../..
+        
     - name: 启用Super分区支持
       if: ${{ env.make_super == 'true' }}
       run: sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
@@ -262,19 +317,22 @@ jobs:
         cd SGSI-build-tool/10
         
         # 添加调试输出
+        echo "::group::构建前环境检查"
         echo "当前工作目录: $(pwd)"
         echo "文件列表:"
         ls -l
         
-        # 验证工具
         echo "验证brotli调用:"
         ./bin/brotli --version || true
         
         echo "验证sdat2img调用:"
         ./bin/sdat2img --help || true
+        echo "::endgroup::"
         
         # 运行构建脚本
+        echo "::group::运行make.sh"
         ./make.sh || true
+        echo "::endgroup::"
         
         # 如果构建失败，显示错误日志
         if [ $? -ne 0 ]; then
@@ -291,12 +349,98 @@ jobs:
         mkdir -p ../../upload
         mv out/* ../../upload/ || true
         
+    - name: 生成SGSI
+      run: |
+        cd SGSI-build-tool/10
+        
+        # 替换关键脚本和工具
+        rm -rf SGSI.sh makeimg.sh bin/mke2fs bin/e2fsdroid dynamic_SGSI.sh oppo.sh make.sh
+        mv ../make/makeimg.sh ../make/SGSI.sh ../make/dynamic_SGSI.sh ../make/oppo.sh ../make/make.sh .
+        mv ../bin/mke2fs ../bin/e2fsdroid bin/
+        
+        # 设置执行权限
+        chmod +x *.sh bin/*
+        
+        # 运行构建脚本
+        echo "::group::运行make.sh (SGSI)"
+        ./make.sh || true
+        echo "::endgroup::"
+        
+        # 如果构建失败，显示错误日志
+        if [ $? -ne 0 ]; then
+          echo "::error::SGSI构建失败，检查日志！"
+          cat ./error.log || true
+          exit 1
+        fi
+        
+        # 确保SGSI目录存在
+        if [ ! -d "SGSI" ]; then
+          echo "::error::未找到SGSI目录"
+          ls -l
+          exit 1
+        fi
+        
+        # 添加到上传目录
+        mkdir -p ../../upload/SGSI
+        mv SGSI/* ../../upload/SGSI/ || true
+        
+    - name: 打包补丁
+      run: |
+        echo "::group::打包补丁"
+        cd Patch
+        
+        # 打包各个补丁目录
+        zip -r Patch1.zip Patch1/*
+        zip -r Patch2.zip Patch2/*
+        zip -r Patch3.zip Patch3/*
+        
+        # 移动到SGSI目录
+        mv Patch1.zip Patch2.zip Patch3.zip ../upload/SGSI/
+        
+        echo "补丁文件列表:"
+        ls -lh ../upload/SGSI/
+        echo "::endgroup::"
+        
+    - name: 压缩SGSI
+      run: |
+        echo "::group::压缩SGSI"
+        cd upload
+        
+        # 创建最终的SGSI压缩包
+        zip -r "${{ env.pack_sgsi }}" SGSI/*
+        
+        # 检查文件大小
+        file_size=$(stat -c%s "${{ env.pack_sgsi }}")
+        max_size=2097152000  # 2GB in bytes
+        
+        if [ $file_size -gt $max_size ]; then
+            echo "文件大于2GB，进行分割"
+            
+            # 创建分割目录
+            mkdir -p split_package
+            
+            # 分割文件
+            split -d -b 1024m "${{ env.pack_sgsi }}" "split_package/${{ env.pack_sgsi }}."
+            
+            # 移除原始大文件
+            rm "${{ env.pack_sgsi }}"
+            
+            # 移动分割文件到上传目录
+            mv split_package/* .
+            rm -r split_package
+        else
+            echo "文件小于2GB，无需分割"
+        fi
+        
+        echo "最终文件列表:"
+        ls -lh
+        echo "::endgroup::"
+        
     - name: 清理工作空间
       run: |
         # 保留必要的构建结果
         mkdir -p upload
         mv SGSI-build-tool/10/tmp/${{ env.rom_name }} upload/ || true
-        mv SGSI-build-tool/10/out/* upload/ || true
         
         # 清理其他文件释放空间
         rm -rf SGSI-build-tool
