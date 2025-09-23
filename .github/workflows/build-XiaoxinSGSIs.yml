@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
@@ -102,22 +103,20 @@ jobs:
       run: |
         tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
         
-        mkdir -p SGSI-build-tool/10/bin
+        # 创建必要的目录结构并设置所有权
+        mkdir -p SGSI-build-tool/10/{bin,fixbug}
+        sudo chown -R $USER:$USER SGSI-build-tool
         
-        # 使用echo创建brotli包装器
+        # 创建包装脚本
         echo -e '#!/bin/bash\nexec /usr/bin/brotli "$@"' > SGSI-build-tool/10/bin/brotli
-        
-        # 使用echo创建sdat2img包装器
         echo -e '#!/bin/bash\nexec /usr/bin/sdat2img "$@"' > SGSI-build-tool/10/bin/sdat2img
-        
-        # 使用echo创建simg2img包装器
         echo -e '#!/bin/bash\nexec /usr/bin/simg2img "$@"' > SGSI-build-tool/10/bin/simg2img
-        
-        # 使用echo创建img2simg包装器
         echo -e '#!/bin/bash\nexec /usr/bin/img2simg "$@"' > SGSI-build-tool/10/bin/img2simg
         
+        # 设置权限
         chmod +x SGSI-build-tool/10/bin/*
         
+        # 修复脚本错误
         sed -i '
           8s/\[ \$MAKETYPE = \]/[ -z "$MAKETYPE" ]/g;
           11s/\[ \$INSTALL_TYPE = \]/[ -z "$INSTALL_TYPE" ]/g;
@@ -176,7 +175,9 @@ jobs:
       run: |
         cd SGSI-build-tool/10
         ROM_TYPE="${{ env.ROM_TYPE }}"
+        sudo chown -R $USER:$USER .
         
+        # 解密ColorOS ROM
         if [[ "$ROM_TYPE" == "coloros" ]]; then
           echo "::group::解密ColorOS ROM"
           python3 oppo_ozip/ozipdecrypt.py "tmp/${{ env.rom_name }}" 2>&1 | tee -a ../../logs/decrypt.log
@@ -185,6 +186,7 @@ jobs:
           echo "::endgroup::"
         fi
         
+        # 创建修复脚本包装器
         declare -A rom_fixes=(
           ["miui"]="MIUI.sh"
           ["flyme"]="Flyme.sh"
@@ -197,17 +199,32 @@ jobs:
         if [ -n "${rom_fixes[$ROM_TYPE]}" ]; then
           echo "创建 $ROM_TYPE 修复脚本包装器" | tee -a ../../logs/config.log
           
-          # 使用echo创建包装脚本
+          # 确保目录存在
+          mkdir -p fixbug
+          
+          # 创建包装脚本
           echo -e '#!/bin/bash\nexec ../../fix/${rom_fixes[$ROM_TYPE]} "$@"' > fixbug/fixbug.sh
           
-          chmod +x fixbug/fixbug.sh
-          echo "包装脚本创建成功" | tee -a ../../logs/config.log
+          # 设置权限（尝试普通权限，失败则使用sudo）
+          chmod +x fixbug/fixbug.sh || {
+            echo "::warning::普通权限设置失败，尝试使用sudo"
+            sudo chmod +x fixbug/fixbug.sh
+          }
+          
+          if [ -x "fixbug/fixbug.sh" ]; then
+            echo "包装脚本创建成功" | tee -a ../../logs/config.log
+          else
+            echo "::error::无法设置包装脚本执行权限" | tee -a ../../logs/error.log
+            exit 1
+          fi
         else
           echo "未找到 $ROM_TYPE 的修复脚本" | tee -a ../../logs/config.log
         fi
         
+        # 启用Super分区支持
         if [[ "${{ env.make_super }}" == "true" ]]; then
           sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
+          echo "已启用Super分区支持" | tee -a ../../logs/config.log
         fi
         
         cd ../..
@@ -221,29 +238,32 @@ jobs:
         
         echo "::group::运行主构建"
         ./make.sh 2>&1 | tee -a ../../logs/build.log
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then
-          echo "::error::构建失败" | tee -a ../../logs/error.log
+        build_exit=${PIPESTATUS[0]}
+        if [ $build_exit -ne 0 ]; then
+          echo "::error::构建失败 (退出码: $build_exit)" | tee -a ../../logs/error.log
           [ -f error.log ] && cp error.log ../../logs/build-error.log
-          exit 1
+          exit $build_exit
         fi
         echo "::endgroup::"
         
         echo "::group::生成SGSI镜像"
         ./SGSI.sh 2>&1 | tee -a ../../logs/sgsi-build.log
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then
-          echo "::error::SGSI生成失败" | tee -a ../../logs/error.log
-          exit 1
+        sgsi_exit=${PIPESTATUS[0]}
+        if [ $sgsi_exit -ne 0 ]; then
+          echo "::error::SGSI生成失败 (退出码: $sgsi_exit)" | tee -a ../../logs/error.log
+          exit $sgsi_exit
         fi
         echo "::endgroup::"
         
         mkdir -p ../../upload/SGSI
-        mv out/* SGSI/* ../../upload/SGSI/
+        mv out/* SGSI/* ../../upload/SGSI/ 2>/dev/null || true
         
     - name: 打包补丁
       run: |
         echo "::group::打包补丁"
         cd SGSI-build-tool/10/Patch
         
+        # 并行打包三个补丁
         (
           zip -r Patch1.zip Patch1/* 2>&1 | tee -a ../../../logs/patch.log
         ) &
@@ -255,7 +275,8 @@ jobs:
         ) &
         wait
         
-        mv Patch*.zip ../../../upload/SGSI/
+        # 移动补丁文件
+        mv Patch*.zip ../../../upload/SGSI/ 2>/dev/null || true
         echo "::endgroup::"
         
     - name: 并行压缩SGSI
@@ -263,19 +284,22 @@ jobs:
         echo "::group::压缩SGSI"
         cd upload/SGSI
         
+        # 使用pigz多线程压缩
         tar --use-compress-program="pigz -9 -k" -cf "${{ env.pack_sgsi }}.tar.gz" . 2>&1 | tee -a ../../logs/compress.log
         
+        # 检查文件大小
         file_size=$(stat -c%s "${{ env.pack_sgsi }}.tar.gz")
-        max_size=2000000000
+        max_size=2000000000  # 2GB
         
         if [ $file_size -gt $max_size ]; then
-            echo "分割超大文件..." | tee -a ../../logs/compress.log
+            echo "分割超大文件 (大小: $((file_size/1000000))MB)..." | tee -a ../../logs/compress.log
             split -d -b 1024m "${{ env.pack_sgsi }}.tar.gz" "${pack_sgsi}_part" 2>&1 | tee -a ../../logs/compress.log
-            rm "${{ env.pack_sgsi }}.tar.gz"
+            rm -f "${{ env.pack_sgsi }}.tar.gz"
         else
             mv "${{ env.pack_sgsi }}.tar.gz" "${{ env.pack_sgsi }}"
         fi
         
+        echo "最终文件列表:"
         ls -lh | tee -a ../../logs/compress.log
         echo "::endgroup::"
         
@@ -285,25 +309,31 @@ jobs:
         echo "收集所有日志文件..." | tee -a logs/collect.log
         mkdir -p upload/logs
         
+        # 收集构建日志
         [ -d logs ] && rsync -av logs/ upload/logs/ 2>&1 | tee -a logs/collect.log
         
+        # 收集SGSI工具日志
         [ -d SGSI-build-tool/10 ] && find SGSI-build-tool/10 -name "*.log" -exec cp --parents {} upload/logs/ \; 2>&1 | tee -a logs/collect.log
         
+        # 创建日志索引
         echo "日志文件清单:" > upload/logs/index.txt
         find upload/logs -type f -printf "%p - %s bytes\n" >> upload/logs/index.txt 2>&1 | tee -a logs/collect.log
         
+        # 压缩日志目录
         cd upload
         tar -czf logs.tar.gz logs 2>&1 | tee -a ../logs/collect.log
-        rm -rf logs
+        rm -rf logs  # 删除未压缩的日志目录
         cd ..
         
         echo "日志收集完成" | tee -a logs/collect.log
         
     - name: 清理工作空间
       run: |
+        # 保留必要的构建结果
         mkdir -p upload
         mv SGSI-build-tool/10/tmp/${{ env.rom_name }} upload/ || true
         
+        # 清理大文件释放空间
         rm -rf SGSI-build-tool
         df -h | tee -a logs/cleanup.log
         
@@ -318,4 +348,5 @@ jobs:
       if: always()
       run: |
         sudo swapoff /swapfile
-        sudo rm /swapfile
+        sudo rm -f /swapfile
+        echo "Swap空间已清理"
