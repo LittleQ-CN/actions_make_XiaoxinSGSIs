@@ -45,6 +45,7 @@ jobs:
         
     - name: 检出代码库
       uses: actions/checkout@v4
+      # 重要：检出到根目录，而非子目录
       
     - name: 清理工作区
       run: |
@@ -148,7 +149,8 @@ jobs:
     - name: 初始化环境
       run: |
         cd SGSI-build-tool/10
-        mv ../../bin/setup.sh .
+        # 重要：从根目录获取setup.sh
+        cp ../../bin/setup.sh .
         echo "::group::运行环境初始化脚本"
         sudo bash setup.sh 2>&1 | tee -a ../../logs/setup.log
         echo "::endgroup::"
@@ -204,7 +206,7 @@ jobs:
           echo "::endgroup::"
         fi
         
-        # 设置修复脚本
+        # 关键修复：设置修复脚本（从根目录获取）
         declare -A rom_fixes=(
           ["miui"]="MIUI.sh"
           ["flyme"]="Flyme.sh"
@@ -215,8 +217,20 @@ jobs:
         )
         
         if [ -n "${rom_fixes[$ROM_TYPE]}" ]; then
-          cp "../../fix/${rom_fixes[$ROM_TYPE]}" fixbug/fixbug.sh
-          chmod +x fixbug/fixbug.sh
+          # 直接从根目录获取修复脚本
+          fix_script_path="../../fix/${rom_fixes[$ROM_TYPE]}"
+          
+          echo "修复脚本路径: $fix_script_path" | tee -a ../../logs/config.log
+          
+          if [ -f "$fix_script_path" ]; then
+            echo "复制修复脚本: $fix_script_path -> fixbug/fixbug.sh" | tee -a ../../logs/config.log
+            cp "$fix_script_path" fixbug/fixbug.sh
+            chmod +x fixbug/fixbug.sh
+          else
+            echo "::warning::修复脚本不存在: $fix_script_path" | tee -a ../../logs/config.log
+          fi
+        else
+          echo "未找到 $ROM_TYPE 的修复脚本" | tee -a ../../logs/config.log
         fi
         
         # 启用Super分区支持
