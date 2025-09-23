@@ -45,8 +45,7 @@ jobs:
         
     - name: 检出代码库
       uses: actions/checkout@v4
-      # 重要：检出到根目录，而非子目录
-      
+        
     - name: 清理工作区
       run: |
         rm -rf SGSI-build-tool upload logs || true
@@ -149,7 +148,7 @@ jobs:
     - name: 初始化环境
       run: |
         cd SGSI-build-tool/10
-        # 重要：从根目录获取setup.sh
+        # 从根目录获取setup.sh
         cp ../../bin/setup.sh .
         echo "::group::运行环境初始化脚本"
         sudo bash setup.sh 2>&1 | tee -a ../../logs/setup.log
@@ -206,7 +205,7 @@ jobs:
           echo "::endgroup::"
         fi
         
-        # 关键修复：设置修复脚本（从根目录获取）
+        # 关键修复：使用包装脚本方案避免权限问题
         declare -A rom_fixes=(
           ["miui"]="MIUI.sh"
           ["flyme"]="Flyme.sh"
@@ -217,18 +216,20 @@ jobs:
         )
         
         if [ -n "${rom_fixes[$ROM_TYPE]}" ]; then
-          # 直接从根目录获取修复脚本
-          fix_script_path="../../fix/${rom_fixes[$ROM_TYPE]}"
+          # 创建包装脚本调用原始修复脚本
+          echo "创建 $ROM_TYPE 修复脚本包装器" | tee -a ../../logs/config.log
           
-          echo "修复脚本路径: $fix_script_path" | tee -a ../../logs/config.log
+          cat > fixbug/fixbug.sh <<EOF
+          #!/bin/bash
+          # 调用原始修复脚本
+          exec ../../fix/${rom_fixes[$ROM_TYPE]} "\$@"
+          EOF
           
-          if [ -f "$fix_script_path" ]; then
-            echo "复制修复脚本: $fix_script_path -> fixbug/fixbug.sh" | tee -a ../../logs/config.log
-            cp "$fix_script_path" fixbug/fixbug.sh
-            chmod +x fixbug/fixbug.sh
-          else
-            echo "::warning::修复脚本不存在: $fix_script_path" | tee -a ../../logs/config.log
-          fi
+          # 仅设置包装脚本权限
+          chmod +x fixbug/fixbug.sh
+          
+          echo "包装脚本内容:" | tee -a ../../logs/config.log
+          cat fixbug/fixbug.sh | tee -a ../../logs/config.log
         else
           echo "未找到 $ROM_TYPE 的修复脚本" | tee -a ../../logs/config.log
         fi
