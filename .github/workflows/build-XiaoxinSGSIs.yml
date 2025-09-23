@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
@@ -110,27 +111,27 @@ jobs:
         
         # 创建brotli包装器
         cat > SGSI-build-tool/10/bin/brotli <<'EOF'
-        #!/bin/bash
-        exec /usr/bin/brotli "$@"
-        EOF
+#!/bin/bash
+exec /usr/bin/brotli "$@"
+EOF
         
         # 创建sdat2img包装器
         cat > SGSI-build-tool/10/bin/sdat2img <<'EOF'
-        #!/bin/bash
-        exec /usr/bin/sdat2img "$@"
-        EOF
+#!/bin/bash
+exec /usr/bin/sdat2img "$@"
+EOF
         
         # 创建simg2img包装器
         cat > SGSI-build-tool/10/bin/simg2img <<'EOF'
-        #!/bin/bash
-        exec /usr/bin/simg2img "$@"
-        EOF
+#!/bin/bash
+exec /usr/bin/simg2img "$@"
+EOF
         
         # 创建img2simg包装器
         cat > SGSI-build-tool/10/bin/img2simg <<'EOF'
-        #!/bin/bash
-        exec /usr/bin/img2simg "$@"
-        EOF
+#!/bin/bash
+exec /usr/bin/img2simg "$@"
+EOF
         
         # 只对我们创建的包装脚本设置权限
         chmod +x SGSI-build-tool/10/bin/*
@@ -216,20 +217,17 @@ jobs:
         )
         
         if [ -n "${rom_fixes[$ROM_TYPE]}" ]; then
-          # 创建包装脚本调用原始修复脚本
           echo "创建 $ROM_TYPE 修复脚本包装器" | tee -a ../../logs/config.log
           
-          cat > fixbug/fixbug.sh <<EOF
-          #!/bin/bash
-          # 调用原始修复脚本
-          exec ../../fix/${rom_fixes[$ROM_TYPE]} "\$@"
-          EOF
+          # 关键修复：正确的EOF格式
+          cat > fixbug/fixbug.sh << 'EOF'
+#!/bin/bash
+# 调用原始修复脚本
+exec ../../fix/${rom_fixes[$ROM_TYPE]} "$@"
+EOF
           
-          # 仅设置包装脚本权限
           chmod +x fixbug/fixbug.sh
-          
-          echo "包装脚本内容:" | tee -a ../../logs/config.log
-          cat fixbug/fixbug.sh | tee -a ../../logs/config.log
+          echo "包装脚本创建成功" | tee -a ../../logs/config.log
         else
           echo "未找到 $ROM_TYPE 的修复脚本" | tee -a ../../logs/config.log
         fi
