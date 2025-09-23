@@ -8,6 +8,7 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
+
     steps:
     - name: 安装系统依赖
       run: |
@@ -86,11 +87,11 @@ jobs:
         tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
         max_retries=5
         for i in $(seq 1 $max_retries); do
-          echo "下载构建工具 (尝试 $i/$max_retries)"
+          echo "下载构建工具 (尝试 $i/$max_retries)" | tee -a logs/download.log
           if command -v curl &> /dev/null; then
-            curl -fL -o SGSI-build-tool.tar "$tool_url" && break
+            curl -fL -o SGSI-build-tool.tar "$tool_url" 2>&1 | tee -a logs/download.log && break
           else
-            wget -c -O SGSI-build-tool.tar "$tool_url" && break
+            wget -c -O SGSI-build-tool.tar "$tool_url" 2>&1 | tee -a logs/download.log && break
           fi
           sleep 10
         done
@@ -104,11 +105,35 @@ jobs:
       run: |
         tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
         
-        # 使用系统工具替代内置工具
-        ln -sf $(which brotli) SGSI-build-tool/10/bin/brotli
-        ln -sf $(which sdat2img) SGSI-build-tool/10/bin/sdat2img
-        ln -sf $(which simg2img) SGSI-build-tool/10/bin/simg2img
-        ln -sf $(which img2simg) SGSI-build-tool/10/bin/img2simg
+        # 关键修复：创建包装脚本替代直接权限修改
+        mkdir -p SGSI-build-tool/10/bin
+        
+        # 创建brotli包装器
+        cat > SGSI-build-tool/10/bin/brotli <<'EOF'
+        #!/bin/bash
+        exec /usr/bin/brotli "$@"
+        EOF
+        
+        # 创建sdat2img包装器
+        cat > SGSI-build-tool/10/bin/sdat2img <<'EOF'
+        #!/bin/bash
+        exec /usr/bin/sdat2img "$@"
+        EOF
+        
+        # 创建simg2img包装器
+        cat > SGSI-build-tool/10/bin/simg2img <<'EOF'
+        #!/bin/bash
+        exec /usr/bin/simg2img "$@"
+        EOF
+        
+        # 创建img2simg包装器
+        cat > SGSI-build-tool/10/bin/img2simg <<'EOF'
+        #!/bin/bash
+        exec /usr/bin/img2simg "$@"
+        EOF
+        
+        # 只对我们创建的包装脚本设置权限
+        chmod +x SGSI-build-tool/10/bin/*
         
         # 修复脚本错误
         sed -i '
@@ -119,7 +144,6 @@ jobs:
         ' SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/make.sh
         
         chmod +x SGSI-build-tool/10/*.sh
-        chmod +x SGSI-build-tool/10/bin/*
         
     - name: 初始化环境
       run: |
@@ -279,26 +303,26 @@ jobs:
     - name: 收集所有日志
       if: always()
       run: |
-        echo "收集所有日志文件..."
+        echo "收集所有日志文件..." | tee -a logs/collect.log
         mkdir -p upload/logs
         
         # 收集构建日志
-        [ -d logs ] && rsync -av logs/ upload/logs/
+        [ -d logs ] && rsync -av logs/ upload/logs/ 2>&1 | tee -a logs/collect.log
         
         # 收集SGSI工具日志
-        [ -d SGSI-build-tool/10 ] && find SGSI-build-tool/10 -name "*.log" -exec cp --parents {} upload/logs/ \;
+        [ -d SGSI-build-tool/10 ] && find SGSI-build-tool/10 -name "*.log" -exec cp --parents {} upload/logs/ \; 2>&1 | tee -a logs/collect.log
         
         # 创建日志索引
         echo "日志文件清单:" > upload/logs/index.txt
-        find upload/logs -type f -printf "%p - %s bytes\n" >> upload/logs/index.txt
+        find upload/logs -type f -printf "%p - %s bytes\n" >> upload/logs/index.txt 2>&1 | tee -a logs/collect.log
         
         # 压缩日志目录
         cd upload
-        tar -czf logs.tar.gz logs
+        tar -czf logs.tar.gz logs 2>&1 | tee -a ../logs/collect.log
         rm -rf logs  # 删除未压缩的日志目录
         cd ..
         
-        echo "日志收集完成"
+        echo "日志收集完成" | tee -a logs/collect.log
         
     - name: 清理工作空间
       run: |
@@ -308,7 +332,7 @@ jobs:
         
         # 清理大文件释放空间
         rm -rf SGSI-build-tool
-        df -h
+        df -h | tee -a logs/cleanup.log
         
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
