@@ -28,9 +28,7 @@ jobs:
           file \
           tree
         
-        # 安装 Python 依赖
         pip3 install protobuf pycryptodome
-        
         echo "所有必需依赖已安装"
         
     - name: 检出代码库
@@ -44,7 +42,6 @@ jobs:
     - name: 读取配置文件
       id: var
       run: |
-        # 从sgsi.json读取配置
         rom_url=$(jq -r '.rom_url' sgsi.json)
         rom_name=$(jq -r '.rom_name' sgsi.json)
         pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
@@ -56,7 +53,6 @@ jobs:
         make_zui=$(jq -r '.make_zui' sgsi.json)
         make_super=$(jq -r '.make_super' sgsi.json)
         
-        # 使用环境文件设置环境变量
         echo "rom_url=$rom_url" >> $GITHUB_ENV
         echo "rom_name=$rom_name" >> $GITHUB_ENV
         echo "pack_sgsi=$pack_sgsi" >> $GITHUB_ENV
@@ -70,10 +66,8 @@ jobs:
         
     - name: 下载构建工具
       run: |
-        # 使用原始GitHub链接下载
         tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
         
-        # 下载并重试机制
         max_retries=5
         for i in $(seq 1 $max_retries); do
           echo "尝试下载构建工具 (第 $i 次)"
@@ -86,7 +80,6 @@ jobs:
           echo "下载中断，继续尝试..."
         done
         
-        # 检查下载结果
         if [ ! -f SGSI-build-tool.tar ]; then
           echo "::error::工具包下载失败"
           exit 1
@@ -104,27 +97,22 @@ jobs:
           exit 1
         fi
         
-        # 关键修复1: 完全移除bin目录并使用系统工具
         rm -rf SGSI-build-tool/10/bin
         mkdir -p SGSI-build-tool/10/bin
         
-        # 关键修复2: 全局替换脚本中的工具调用
         find SGSI-build-tool/10 -type f -exec sed -i '
           s|\./bin/brotli|brotli|g;
           s|bin/sdat2img\.py|sdat2img|g;
           s|\./bin/simg2img|simg2img|g;
         ' {} \;
         
-        # 关键修复3: 修复脚本语法错误
         sed -i '
           8s/\[ \$MAKETYPE = \]/[ -z "$MAKETYPE" ]/g;
           11s/\[ \$INSTALL_TYPE = \]/[ -z "$INSTALL_TYPE" ]/g;
         ' SGSI-build-tool/10/SGSI.sh
         
-        # 关键修复4: 移除所有chown调用
         find SGSI-build-tool/10 -type f -exec sed -i '/chown/d' {} \;
         
-        # 关键修复5: 添加工具检查
         echo "#!/bin/bash" > SGSI-build-tool/10/bin/brotli
         echo "command -v brotli >/dev/null || { echo >&2 'brotli未安装'; exit 127; }" >> SGSI-build-tool/10/bin/brotli
         echo 'exec brotli "$@"' >> SGSI-build-tool/10/bin/brotli
@@ -137,22 +125,19 @@ jobs:
         echo "command -v simg2img >/dev/null || { echo >&2 'simg2img未安装'; exit 127; }" >> SGSI-build-tool/10/bin/simg2img
         echo 'exec simg2img "$@"' >> SGSI-build-tool/10/bin/simg2img
         
-        # 设置执行权限
         chmod +x SGSI-build-tool/10/bin/*
         find SGSI-build-tool -type f \( -name "*.sh" -o -name "*.py" \) -exec chmod +x {} \;
         
     - name: 初始化环境
       run: |
-        # 移除原有的setup.sh并使用自定义版本
         rm -f SGSI-build-tool/10/setup.sh
         mv bin/setup.sh SGSI-build-tool/10/
         
         cd SGSI-build-tool/10
         echo "::group::运行环境初始化脚本"
-        sudo bash setup.sh || true
+        bash setup.sh || true   # 去掉了sudo
         echo "::endgroup::"
         
-        # 验证初始化结果
         echo "初始化后目录内容:"
         ls -l
         
@@ -162,7 +147,7 @@ jobs:
       run: |
         echo "::group::磁盘空间检查"
         df -h
-        min_free=10 # 最小10GB空闲空间
+        min_free=10
         free_space=$(df -BG . | awk 'NR==2 {print $4}' | tr -d 'G')
         
         if [ "$free_space" -lt "$min_free" ]; then
@@ -176,7 +161,6 @@ jobs:
         mkdir -p SGSI-build-tool/10/tmp
         rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
         
-        # 带进度显示和重试的下载
         function download_with_progress() {
           if command -v curl &> /dev/null; then
             curl -# -L -k -C - "$1" -o "$2"
@@ -198,8 +182,7 @@ jobs:
           exit 1
         fi
         
-        # 校验最小文件大小
-        min_size=$((100*1024*1024)) # 100MB
+        min_size=$((100*1024*1024))
         file_size=$(stat -c%s "$rom_path")
         if [ $file_size -lt $min_size ]; then
           echo "::error::ROM文件过小 (${file_size}字节)，可能不完整"
@@ -212,10 +195,8 @@ jobs:
       run: |
         cd SGSI-build-tool/10
         
-        # 验证工具可用性
         echo "::group::验证工具"
         echo "系统brotli路径: $(which brotli)"
-        echo "系统brotli信息:"
         file $(which brotli)
         brotli --version
         
@@ -226,13 +207,11 @@ jobs:
         simg2img --version || true
         echo "::endgroup::"
         
-        # 验证ROM文件存在
         echo "::group::ROM文件验证"
         echo "ROM文件路径: tmp/${{ env.rom_name }}"
         ls -lh tmp/
         echo "::endgroup::"
         
-        # 预解压ROM包进行验证
         echo "::group::预解压ROM包"
         mkdir -p tmp/unpack-test
         unzip -t "tmp/${{ env.rom_name }}" -d tmp/unpack-test || true
@@ -240,7 +219,6 @@ jobs:
         echo "解压后文件列表:"
         tree -L 2 tmp/unpack-test || ls -lR tmp/unpack-test
         
-        # 检查关键文件是否存在
         critical_files=("system.new.dat.br" "system.new.br" "system.img" "vendor.new.dat.br" "vendor.new.br" "vendor.img")
         for file in "${critical_files[@]}"; do
           if find tmp/unpack-test -name "$file" | grep -q .; then
@@ -250,7 +228,6 @@ jobs:
           fi
         done
         
-        # 清理测试目录
         rm -rf tmp/unpack-test
         echo "::endgroup::"
         
@@ -277,16 +254,16 @@ jobs:
     - name: 生成ColorOS镜像
       if: ${{ env.make_coloros == 'true' }}
       run: |
-        # 解密ColorOS ROM
-        python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ env.rom_name }}
+        # 只有.ozip文件才解密
+        if [[ "${{ env.rom_name }}" == *.ozip ]]; then
+          python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ env.rom_name }}
+          decrypted_name="${rom_name%.ozip}.zip"
+          echo "rom_name=$decrypted_name" >> $GITHUB_ENV
+          # 注意：此时原始.ozip文件还存在，而解密后的.zip文件也存在
+        else
+          echo "不是ColorOS的.ozip文件，无需解密"
+        fi
         
-        # 获取解密后的文件名 (移除.ozip扩展名)
-        decrypted_name="${rom_name%.ozip}.zip"
-        
-        # 更新ROM路径为解密后的文件
-        echo "rom_name=$decrypted_name" >> $GITHUB_ENV
-        
-        # 设置修复脚本
         rm -f SGSI-build-tool/10/fixbug/fixbug.sh
         mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
         chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
@@ -316,10 +293,8 @@ jobs:
       run: |
         cd SGSI-build-tool/10
         
-        # 添加调试输出
         echo "::group::构建前环境检查"
         echo "当前工作目录: $(pwd)"
-        echo "文件列表:"
         ls -l
         
         echo "验证brotli调用:"
@@ -329,23 +304,19 @@ jobs:
         ./bin/sdat2img --help || true
         echo "::endgroup::"
         
-        # 运行构建脚本
         echo "::group::运行make.sh"
         ./make.sh || true
         echo "::endgroup::"
         
-        # 如果构建失败，显示错误日志
         if [ $? -ne 0 ]; then
           echo "::error::构建失败，检查日志！"
           cat ./error.log || true
           exit 1
         fi
         
-        # 确保输出目录存在
         mkdir -p out
         ls -l out/
         
-        # 创建上传目录
         mkdir -p ../../upload
         mv out/* ../../upload/ || true
         
@@ -353,52 +324,53 @@ jobs:
       run: |
         cd SGSI-build-tool/10
         
-        # 替换关键脚本和工具
-        rm -rf SGSI.sh makeimg.sh bin/mke2fs bin/e2fsdroid dynamic_SGSI.sh oppo.sh make.sh
-        mv ../make/makeimg.sh ../make/SGSI.sh ../make/dynamic_SGSI.sh ../make/oppo.sh ../make/make.sh .
-        mv ../bin/mke2fs ../bin/e2fsdroid bin/
+        # 假设仓库根目录下的make目录和bin目录中有我们需要的文件
+        # 先删除10目录下的旧文件
+        rm -f SGSI.sh makeimg.sh dynamic_SGSI.sh oppo.sh make.sh
+        rm -f bin/mke2fs bin/e2fsdroid
         
-        # 设置执行权限
+        # 从仓库根目录的make和bin目录移动文件
+        mv ../../../make/makeimg.sh ../../../make/SGSI.sh ../../../make/dynamic_SGSI.sh ../../../make/oppo.sh ../../../make/make.sh .
+        mv ../../../bin/mke2fs ../../../bin/e2fsdroid bin/
+        
         chmod +x *.sh bin/*
         
-        # 运行构建脚本
         echo "::group::运行make.sh (SGSI)"
         ./make.sh || true
         echo "::endgroup::"
         
-        # 如果构建失败，显示错误日志
         if [ $? -ne 0 ]; then
           echo "::error::SGSI构建失败，检查日志！"
           cat ./error.log || true
           exit 1
         fi
         
-        # 确保SGSI目录存在
         if [ ! -d "SGSI" ]; then
           echo "::error::未找到SGSI目录"
           ls -l
           exit 1
         fi
         
-        # 添加到上传目录
         mkdir -p ../../upload/SGSI
         mv SGSI/* ../../upload/SGSI/ || true
         
     - name: 打包补丁
       run: |
         echo "::group::打包补丁"
+        # 假设仓库根目录下有一个Patch目录
+        cd ../../..   # 回到仓库根目录
         cd Patch
         
-        # 打包各个补丁目录
         zip -r Patch1.zip Patch1/*
         zip -r Patch2.zip Patch2/*
         zip -r Patch3.zip Patch3/*
         
-        # 移动到SGSI目录
-        mv Patch1.zip Patch2.zip Patch3.zip ../upload/SGSI/
+        # 移动到upload/SGSI目录
+        mkdir -p upload/SGSI
+        mv Patch1.zip Patch2.zip Patch3.zip upload/SGSI/
         
         echo "补丁文件列表:"
-        ls -lh ../upload/SGSI/
+        ls -lh upload/SGSI/
         echo "::endgroup::"
         
     - name: 压缩SGSI
@@ -406,26 +378,16 @@ jobs:
         echo "::group::压缩SGSI"
         cd upload
         
-        # 创建最终的SGSI压缩包
         zip -r "${{ env.pack_sgsi }}" SGSI/*
         
-        # 检查文件大小
         file_size=$(stat -c%s "${{ env.pack_sgsi }}")
-        max_size=2097152000  # 2GB in bytes
+        max_size=2097152000
         
         if [ $file_size -gt $max_size ]; then
             echo "文件大于2GB，进行分割"
-            
-            # 创建分割目录
             mkdir -p split_package
-            
-            # 分割文件
             split -d -b 1024m "${{ env.pack_sgsi }}" "split_package/${{ env.pack_sgsi }}."
-            
-            # 移除原始大文件
             rm "${{ env.pack_sgsi }}"
-            
-            # 移动分割文件到上传目录
             mv split_package/* .
             rm -r split_package
         else
@@ -438,11 +400,9 @@ jobs:
         
     - name: 清理工作空间
       run: |
-        # 保留必要的构建结果
         mkdir -p upload
         mv SGSI-build-tool/10/tmp/${{ env.rom_name }} upload/ || true
         
-        # 清理其他文件释放空间
         rm -rf SGSI-build-tool
         rm -f SGSI-build-tool.tar
         df -h
