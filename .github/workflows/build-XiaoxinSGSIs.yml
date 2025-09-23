@@ -1,4 +1,3 @@
-
 name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
@@ -101,13 +100,16 @@ jobs:
         
     - name: 设置构建环境
       run: |
+        echo "::group::解压工具包"
         tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
         
-        # 创建必要的目录结构并设置所有权
-        mkdir -p SGSI-build-tool/10/{bin,fixbug}
+        # 创建完整的目录结构
+        echo "创建目录结构"
+        mkdir -p SGSI-build-tool/10/{bin,fixbug,Patch/Patch1,Patch/Patch2,Patch/Patch3}
         sudo chown -R $USER:$USER SGSI-build-tool
         
         # 创建包装脚本
+        echo "创建包装脚本"
         echo -e '#!/bin/bash\nexec /usr/bin/brotli "$@"' > SGSI-build-tool/10/bin/brotli
         echo -e '#!/bin/bash\nexec /usr/bin/sdat2img "$@"' > SGSI-build-tool/10/bin/sdat2img
         echo -e '#!/bin/bash\nexec /usr/bin/simg2img "$@"' > SGSI-build-tool/10/bin/simg2img
@@ -117,6 +119,7 @@ jobs:
         chmod +x SGSI-build-tool/10/bin/*
         
         # 修复脚本错误
+        echo "修复脚本错误"
         sed -i '
           8s/\[ \$MAKETYPE = \]/[ -z "$MAKETYPE" ]/g;
           11s/\[ \$INSTALL_TYPE = \]/[ -z "$INSTALL_TYPE" ]/g;
@@ -125,6 +128,7 @@ jobs:
         ' SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/make.sh
         
         chmod +x SGSI-build-tool/10/*.sh
+        echo "::endgroup::"
         
     - name: 初始化环境
       run: |
@@ -149,6 +153,7 @@ jobs:
         
     - name: 下载ROM文件
       run: |
+        echo "::group::下载ROM文件"
         mkdir -p SGSI-build-tool/10/tmp
         rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
         
@@ -170,9 +175,11 @@ jobs:
           echo "::error::ROM文件无效" | tee -a logs/error.log
           exit 1
         fi
+        echo "::endgroup::"
         
     - name: 设置ROM特定配置
       run: |
+        echo "::group::设置ROM配置"
         cd SGSI-build-tool/10
         ROM_TYPE="${{ env.ROM_TYPE }}"
         sudo chown -R $USER:$USER .
@@ -199,7 +206,7 @@ jobs:
         if [ -n "${rom_fixes[$ROM_TYPE]}" ]; then
           echo "创建 $ROM_TYPE 修复脚本包装器" | tee -a ../../logs/config.log
           
-          # 确保目录存在
+          # 确保fixbug目录存在
           mkdir -p fixbug
           
           # 创建包装脚本
@@ -228,9 +235,11 @@ jobs:
         fi
         
         cd ../..
+        echo "::endgroup::"
         
     - name: 执行并行构建
       run: |
+        echo "::group::执行构建"
         cd SGSI-build-tool/10
         
         echo "构建开始时间: $(date)" > ../../logs/build.log
@@ -257,32 +266,65 @@ jobs:
         
         mkdir -p ../../upload/SGSI
         mv out/* SGSI/* ../../upload/SGSI/ 2>/dev/null || true
+        echo "::endgroup::"
         
     - name: 打包补丁
       run: |
         echo "::group::打包补丁"
-        cd SGSI-build-tool/10/Patch
+        cd SGSI-build-tool/10
         
-        # 并行打包三个补丁
+        # 确保补丁目录存在
+        if [ ! -d "Patch" ]; then
+          mkdir -p Patch/{Patch1,Patch2,Patch3}
+          echo "创建补丁目录结构" | tee -a ../../logs/patch.log
+        fi
+        
+        # 并行打包补丁
         (
-          zip -r Patch1.zip Patch1/* 2>&1 | tee -a ../../../logs/patch.log
+          if [ -d "Patch/Patch1" ] && [ "$(ls -A Patch/Patch1)" ]; then
+            zip -r Patch1.zip Patch/Patch1/* 2>&1 | tee -a ../../logs/patch.log
+          else
+            echo "Patch1目录为空或不存在" | tee -a ../../logs/patch.log
+          fi
         ) &
+        
         (
-          zip -r Patch2.zip Patch2/* 2>&1 | tee -a ../../../logs/patch.log
+          if [ -d "Patch/Patch2" ] && [ "$(ls -A Patch/Patch2)" ]; then
+            zip -r Patch2.zip Patch/Patch2/* 2>&1 | tee -a ../../logs/patch.log
+          else
+            echo "Patch2目录为空或不存在" | tee -a ../../logs/patch.log
+          fi
         ) &
+        
         (
-          zip -r Patch3.zip Patch3/* 2>&1 | tee -a ../../../logs/patch.log
+          if [ -d "Patch/Patch3" ] && [ "$(ls -A Patch/Patch3)" ]; then
+            zip -r Patch3.zip Patch/Patch3/* 2>&1 | tee -a ../../logs/patch.log
+          else
+            echo "Patch3目录为空或不存在" | tee -a ../../logs/patch.log
+          fi
         ) &
+        
         wait
         
         # 移动补丁文件
-        mv Patch*.zip ../../../upload/SGSI/ 2>/dev/null || true
+        mkdir -p ../../upload/SGSI
+        for patch in Patch1.zip Patch2.zip Patch3.zip; do
+          if [ -f "$patch" ]; then
+            mv "$patch" ../../upload/SGSI/
+            echo "移动补丁文件: $patch" | tee -a ../../logs/patch.log
+          fi
+        done
+        
         echo "::endgroup::"
         
     - name: 并行压缩SGSI
       run: |
         echo "::group::压缩SGSI"
         cd upload/SGSI
+        
+        # 创建文件列表
+        echo "压缩前文件列表:" | tee -a ../../logs/compress.log
+        ls -lh | tee -a ../../logs/compress.log
         
         # 使用pigz多线程压缩
         tar --use-compress-program="pigz -9 -k" -cf "${{ env.pack_sgsi }}.tar.gz" . 2>&1 | tee -a ../../logs/compress.log
@@ -306,6 +348,7 @@ jobs:
     - name: 收集所有日志
       if: always()
       run: |
+        echo "::group::收集日志"
         echo "收集所有日志文件..." | tee -a logs/collect.log
         mkdir -p upload/logs
         
@@ -313,7 +356,9 @@ jobs:
         [ -d logs ] && rsync -av logs/ upload/logs/ 2>&1 | tee -a logs/collect.log
         
         # 收集SGSI工具日志
-        [ -d SGSI-build-tool/10 ] && find SGSI-build-tool/10 -name "*.log" -exec cp --parents {} upload/logs/ \; 2>&1 | tee -a logs/collect.log
+        if [ -d SGSI-build-tool/10 ]; then
+          find SGSI-build-tool/10 -name "*.log" -exec cp --parents {} upload/logs/ \; 2>&1 | tee -a logs/collect.log
+        fi
         
         # 创建日志索引
         echo "日志文件清单:" > upload/logs/index.txt
@@ -326,16 +371,19 @@ jobs:
         cd ..
         
         echo "日志收集完成" | tee -a logs/collect.log
+        echo "::endgroup::"
         
     - name: 清理工作空间
       run: |
+        echo "::group::清理工作空间"
         # 保留必要的构建结果
         mkdir -p upload
-        mv SGSI-build-tool/10/tmp/${{ env.rom_name }} upload/ || true
+        find SGSI-build-tool/10/tmp -maxdepth 1 -type f -exec mv {} upload/ \; 2>/dev/null || true
         
         # 清理大文件释放空间
         rm -rf SGSI-build-tool
         df -h | tee -a logs/cleanup.log
+        echo "::endgroup::"
         
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
