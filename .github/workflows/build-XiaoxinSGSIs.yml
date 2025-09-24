@@ -1,18 +1,19 @@
 name: build_XiaoxinSGSIs_Old_With_Ai-fix
 
 on:
-  watch:
-    types: [started]
+  repository_dispatch:
+    types: [build-request]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    if: github.event.repository.owner.id == github.event.sender.id
+    timeout-minutes: 120
 
     steps:
     - name: 安装系统依赖
       run: |
-        sudo apt-get update
+        sudo apt-get update -y
         sudo apt-get install -y \
           brotli \
           p7zip-full \
@@ -27,52 +28,40 @@ jobs:
           git \
           file \
           tree \
-          pigz
+          pigz \
+          rsync
         
+        pip3 install --upgrade pip
         pip3 install protobuf pycryptodome
-        echo "所有必需依赖已安装"
-        
+
     - name: 准备Swap空间
       run: |
-        sudo fallocate -l 4G /swapfile
+        sudo fallocate -l 8G /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
         free -h
-        
+
     - name: 检出代码库
       uses: actions/checkout@v4
-      
-    - name: 清理工作区
-      run: |
-        rm -rf SGSI-build-tool upload logs || true
-        df -h
-        
+      with:
+        fetch-depth: 0
+
     - name: 读取配置文件
-      id: var
+      id: config
       run: |
-        rom_url=$(jq -r '.rom_url' sgsi.json)
-        rom_name=$(jq -r '.rom_name' sgsi.json)
-        pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
-        make_miui=$(jq -r '.make_miui' sgsi.json)
-        make_flyme=$(jq -r '.make_flyme' sgsi.json)
-        make_coloros=$(jq -r '.make_coloros' sgsi.json)
-        make_h2os=$(jq -r '.make_h2os' sgsi.json)
-        make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)
-        make_zui=$(jq -r '.make_zui' sgsi.json)
-        make_super=$(jq -r '.make_super' sgsi.json)
-        
-        echo "rom_url=$rom_url" >> $GITHUB_ENV
-        echo "rom_name=$rom_name" >> $GITHUB_ENV
-        echo "pack_sgsi=$pack_sgsi" >> $GITHUB_ENV
-        echo "make_miui=$make_miui" >> $GITHUB_ENV
-        echo "make_flyme=$make_flyme" >> $GITHUB_ENV
-        echo "make_coloros=$make_coloros" >> $GITHUB_ENV
-        echo "make_h2os=$make_h2os" >> $GITHUB_ENV
-        echo "make_smartisanos=$make_smartisanos" >> $GITHUB_ENV
-        echo "make_zui=$make_zui" >> $GITHUB_ENV
-        echo "make_super=$make_super" >> $GITHUB_ENV
-        
+        # 从sgsi.json读取配置
+        config=$(cat sgsi.json)
+        echo "配置内容:"
+        echo "$config"
+
+        for key in $(jq -r 'keys[]' sgsi.json); do
+          value=$(jq -r ".$key" sgsi.json)
+          echo "$key=$value" >> $GITHUB_ENV
+          echo "设置环境变量: $key=$value"
+        done
+
+        # 确定ROM类型
         declare -A rom_types=(
           ["make_miui"]="miui"
           ["make_flyme"]="flyme"
@@ -81,7 +70,7 @@ jobs:
           ["make_smartisanos"]="smartisanos"
           ["make_zui"]="zui"
         )
-        
+
         ROM_TYPE=""
         for key in "${!rom_types[@]}"; do
           if [[ "${!key}" == "true" ]]; then
@@ -89,277 +78,178 @@ jobs:
             break
           fi
         done
-        
-        if [[ -z "$ROM_TYPE" ]]; then
-          ROM_TYPE="standard"
-        fi
-        
+
+        [[ -z "$ROM_TYPE" ]] && ROM_TYPE="standard"
         echo "ROM_TYPE=$ROM_TYPE" >> $GITHUB_ENV
+        echo "确定ROM类型: $ROM_TYPE"
+
         mkdir -p logs
-        
-    - name: 缓存构建工具
-      id: tool-cache
-      uses: actions/cache@v4
-      with:
-        path: SGSI-build-tool.tar
-        key: ${{ runner.os }}-sgsitool-v1.9-${{ hashFiles('sgsi.json') }}
-        
+
     - name: 下载构建工具
-      if: steps.tool-cache.outputs.cache-hit != 'true'
       run: |
         tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
-        max_retries=5
-        for i in $(seq 1 $max_retries); do
-          echo "下载构建工具 (尝试 $i/$max_retries)"
-          if command -v curl &> /dev/null; then
-            curl -fL -o SGSI-build-tool.tar "$tool_url" && break
-          else
-            wget -c -O SGSI-build-tool.tar "$tool_url" && break
-          fi
-          sleep 10
-        done
+        echo "下载构建工具从: $tool_url"
         
-        if [ ! -f SGSI-build-tool.tar ]; then
-          echo "::error::工具包下载失败"
+        for i in {1..5}; do
+          echo "尝试 #$i"
+          if curl -fL -o SGSI-build-tool.tar "$tool_url"; then
+            echo "下载成功"
+            break
+          else
+            echo "下载失败, 等待10秒后重试..."
+            sleep 10
+          fi
+        done
+
+        if [ ! -f "SGSI-build-tool.tar" ]; then
+          echo "::error::无法下载构建工具"
           exit 1
         fi
-        
+
+        tar -xf SGSI-build-tool.tar --no-same-owner
+        ls -l SGSI-build-tool/
+
     - name: 设置构建环境
       run: |
-        tar -xf SGSI-build-tool.tar --no-same-owner --no-overwrite-dir
-        mkdir -p SGSI-build-tool/10/{bin,fixbug,Patch}
-        sudo chown -R $USER:$USER SGSI-build-tool
+        cd SGSI-build-tool/10
         
-        echo -e '#!/bin/bash\nexec /usr/bin/brotli "$@"' > SGSI-build-tool/10/bin/brotli
-        echo -e '#!/bin/bash\nexec /usr/bin/sdat2img "$@"' > SGSI-build-tool/10/bin/sdat2img
-        echo -e '#!/bin/bash\nexec /usr/bin/simg2img "$@"' > SGSI-build-tool/10/bin/simg2img
-        echo -e '#!/bin/bash\nexec /usr/bin/img2simg "$@"' > SGSI-build-tool/10/bin/img2simg
-        
-        chmod +x SGSI-build-tool/10/bin/*
-        
+        # 修复脚本错误
         sed -i '
-          8s/\[ \$MAKETYPE = \]/[ -z "$MAKETYPE" ]/g;
-          11s/\[ \$INSTALL_TYPE = \]/[ -z "$INSTALL_TYPE" ]/g;
           s|\./bin/|bin/|g;
+          s|\[ \$MAKETYPE = \]|[ -z "$MAKETYPE" ]|g;
+          s|\[ \$INSTALL_TYPE = \]|[ -z "$INSTALL_TYPE" ]|g;
           /chown/d;
-        ' SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/make.sh
+        ' SGSI.sh make.sh
+
+        # 创建必要的目录结构
+        mkdir -p {bin,fixbug,Patch}
         
-        chmod +x SGSI-build-tool/10/*.sh
+        # 创建包装脚本
+        cat > bin/brotli << 'EOF'
+        #!/bin/bash
+        exec /usr/bin/brotli "$@"
+        EOF
         
+        cat > bin/sdat2img << 'EOF'
+        #!/bin/bash
+        exec /usr/bin/sdat2img "$@"
+        EOF
+
+        for f in bin/*; do chmod +x "$f"; done
+        chmod +x *.sh
+
     - name: 初始化环境
       run: |
-        cd SGSI-build-tool/10
-        sudo ./setup.sh
-        cd ../..
+        cd SGSI-build-tool
+        echo "当前目录: $(pwd)"
+        echo "文件列表:"
+        ls -l
         
-    - name: 磁盘空间监控
-      run: |
-        min_free=10
-        free_space=$(df -BG . | awk 'NR==2 {print $4}' | tr -d 'G')
-        [ "$free_space" -lt "$min_free" ] && {
-          echo "::error::磁盘空间不足! 需要 ${min_free}GB, 当前 ${free_space}GB"
-          exit 1
-        }
-        
+        echo "::group::运行setup.sh"
+        sudo ./setup.sh 2>&1 | tee ../../logs/setup.log
+        echo "::endgroup::"
+
     - name: 下载ROM文件
       run: |
         mkdir -p SGSI-build-tool/10/tmp
-        rom_path="SGSI-build-tool/10/tmp/${{ env.rom_name }}"
+        cd SGSI-build-tool/10/tmp
         
-        function download_with_progress() {
-          if command -v curl &> /dev/null; then
-            curl -# -L -k -C - "$1" -o "$2"
+        echo "下载ROM从: $rom_url"
+        echo "保存为: $rom_name"
+        
+        for i in {1..5}; do
+          echo "尝试 #$i"
+          if curl -fL -o "$rom_name" "$rom_url"; then
+            echo "下载成功"
+            break
           else
-            wget --progress=bar:force -c "$1" -O "$2"
+            echo "下载失败, 等待10秒后重试..."
+            sleep 10
           fi
-        }
-        
-        max_retries=5
-        for i in $(seq 1 $max_retries); do
-          download_with_progress "${{ env.rom_url }}" "$rom_path" && break
-          sleep 10
         done
 
-        if [ ! -f "$rom_path" ] || [ $(stat -c%s "$rom_path") -lt 100000000 ]; then
-          echo "::error::ROM文件无效"
+        if [ ! -f "$rom_name" ]; then
+          echo "::error::无法下载ROM文件"
           exit 1
         fi
-        
-    - name: 设置ROM特定配置
+
+        # 验证文件大小
+        filesize=$(stat -c%s "$rom_name")
+        echo "ROM文件大小: $filesize 字节"
+        if [ "$filesize" -lt 100000000 ]; then
+          echo "::error::ROM文件太小, 可能下载不完整"
+          exit 1
+        fi
+
+    - name: 执行构建
       run: |
         cd SGSI-build-tool/10
-        ROM_TYPE="${{ env.ROM_TYPE }}"
-        sudo chown -R $USER:$USER .
+        echo "::group::执行make.sh"
+        ./make.sh 2>&1 | tee ../../logs/make.log
+        echo "::endgroup::"
         
-        declare -A rom_fixes=(
-          ["miui"]="MIUI.sh"
-          ["flyme"]="Flyme.sh"
-          ["coloros"]="ColorOS.sh"
-          ["h2os"]="H2OS.sh"
-          ["smartisanos"]="SmartisanOS.sh"
-          ["zui"]="ZUI.sh"
-        )
-        
-        if [ -n "${rom_fixes[$ROM_TYPE]}" ]; then
-          mkdir -p fixbug
-          echo -e '#!/bin/bash\nexec ../../fix/${rom_fixes[$ROM_TYPE]} "$@"' > fixbug/fixbug.sh
-          chmod +x fixbug/fixbug.sh
+        if [ $? -ne 0 ]; then
+          echo "::error::make.sh执行失败"
+          exit 1
         fi
+
+        echo "::group::执行SGSI.sh"
+        ./SGSI.sh 2>&1 | tee ../../logs/sgsi.log
+        echo "::endgroup::"
         
-        if [[ "${{ env.make_super }}" == "true" ]]; then
-          sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
+        if [ $? -ne 0 ]; then
+          echo "::error::SGSI.sh执行失败"
+          exit 1
         fi
-        
-        cd ../..
-        
-    - name: 执行并行构建
-      run: |
-        cd SGSI-build-tool/10
-        
-        ./make.sh
-        build_exit=$?
-        if [ $build_exit -ne 0 ]; then
-          echo "::error::构建失败 (退出码: $build_exit)"
-          exit $build_exit
-        fi
-        
-        if [ ! -f "system.img" ]; then
-          SRC_DIR=""
-          if [ -d "tmp/system" ]; then
-            SRC_DIR="tmp/system"
-          elif [ -d "system" ]; then
-            SRC_DIR="system"
-          elif [ -d "tmp/system/system" ]; then
-            SRC_DIR="tmp/system/system"
-          else
-            mkdir -p tmp/system_tmp
-            if [[ "${{ env.rom_name }}" == *.zip ]]; then
-              unzip -o "tmp/${{ env.rom_name }}" "system/*" -d tmp/system_tmp/
-              if [ -d "tmp/system_tmp/system" ]; then
-                SRC_DIR="tmp/system_tmp/system"
-              fi
-            else
-              7z x -otmp/system_tmp "tmp/${{ env.rom_name }}" "system/*"
-              if [ -d "tmp/system_tmp/system" ]; then
-                SRC_DIR="tmp/system_tmp/system"
-              fi
-            fi
-          fi
-          
-          if [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ]; then
-            size_kb=$(du -sk "$SRC_DIR" | cut -f1)
-            img_size_kb=$((size_kb * 11 / 10))
-            img_size_mb=$((img_size_kb / 1024))
-            
-            dd if=/dev/zero of=system.img bs=1M count=$img_size_mb
-            mkfs.ext4 -F system.img
-            
-            sudo mkdir -p /mnt/manual_system
-            sudo mount -o loop system.img /mnt/manual_system
-            sudo cp -a "$SRC_DIR/." /mnt/manual_system/
-            sudo umount /mnt/manual_system
-            sudo rm -rf /mnt/manual_system
-            rm -rf tmp/system_tmp
-          else
-            echo "::error::无法手动创建system.img: 未找到源文件目录"
-            exit 1
-          fi
-        fi
-        
-        ./SGSI.sh
-        sgsi_exit=$?
-        if [ $sgsi_exit -ne 0 ]; then
-          echo "::error::SGSI生成失败 (退出码: $sgsi_exit)"
-          exit $sgsi_exit
-        fi
-        
+
+        # 收集输出文件
         mkdir -p ../../upload/SGSI
         mv out/* ../../upload/SGSI/ 2>/dev/null || true
         mv SGSI/* ../../upload/SGSI/ 2>/dev/null || true
+
         if [ -f "system.img" ]; then
           mv system.img ../../upload/SGSI/
         fi
-        if [ -f "vendor.img" ]; then
-          mv vendor.img ../../upload/SGSI/
-        fi
-        
-    - name: 准备刷机镜像
+
+        echo "构建产物:"
+        ls -lh ../../upload/SGSI/
+
+    - name: 准备发布包
       run: |
         cd upload/SGSI
         
-        if [ -f "vendor.img" ]; then
-          rm -f vendor.img
-        fi
-        
+        # 处理system.img
         if [ -f "system.img.br" ]; then
+          echo "解压system.img.br"
           brotli -d system.img.br -o system.img
           rm -f system.img.br
         fi
         
-        cat << 'EOF' > README.txt
-        ========== 刷机说明 ==========
-        
-        1. 确保设备已解锁并进入fastboot模式
-        2. 连接设备到电脑
-        3. 使用以下命令刷入系统镜像:
-            fastboot flash system system.img
-        4. 刷机完成后重启设备:
-            fastboot reboot
-        
-        注意: 此镜像仅包含system分区，刷入前请确保您的设备支持单独刷入system分区
+        # 创建说明文件
+        cat > README.txt << 'EOF'
+        ===== 刷机说明 =====
+        1. 进入fastboot模式
+        2. 执行: fastboot flash system system.img
+        3. 重启设备: fastboot reboot
         EOF
         
-        find . -type f ! -name 'system.img' ! -name 'README.txt' -delete
+        # 创建压缩包
+        echo "创建压缩包: $pack_sgsi"
+        tar --use-compress-program="pigz -9" -cvf "../$pack_sgsi" .
         
-    - name: 并行压缩SGSI
-      run: |
-        cd upload/SGSI
-        
-        tar --use-compress-program="pigz -9 -k" -cf "${{ env.pack_sgsi }}.tar.gz" .
-        
-        gz_file="${{ env.pack_sgsi }}.tar.gz"
-        file_size=$(stat -c%s "$gz_file")
-        max_size=2000000000
-        
-        if [ $file_size -gt $max_size ]; then
-            split -d -b 1024m "$gz_file" "${pack_sgsi}_part"
-            rm -f "$gz_file"
-        else
-            mv "$gz_file" "${{ env.pack_sgsi }}"
-        fi
-        
-    - name: 收集所有日志
-      if: always()
-      run: |
-        mkdir -p upload/logs
-        
-        [ -d logs ] && rsync -av logs/ upload/logs/
-        
-        if [ -d SGSI-build-tool/10 ]; then
-          find SGSI-build-tool/10 -name "*.log" -exec cp --parents {} upload/logs/ \;
-        fi
-        
-        cd upload
-        tar -czf logs.tar.gz logs
-        rm -rf logs
-        cd ..
-        
-    - name: 清理工作空间
-      run: |
-        mv "${{ env.pack_sgsi }}"* upload/ 2>/dev/null || true
-        rm -rf SGSI-build-tool
-        rm -rf upload/SGSI
-        
-    - name: 上传构建产物
+        # 检查文件大小
+        filesize=$(stat -c%s "../$pack_sgsi")
+        echo "压缩包大小: $((filesize/1024/1024))MB"
+
+    - name: 上传产物
       uses: actions/upload-artifact@v4
       with:
-        name: XiaoxinSGSI
-        path: upload
+        name: Build-Output
+        path: upload/
         retention-days: 1
-        
+
     - name: 清理Swap空间
       if: always()
       run: |
         sudo swapoff /swapfile
         sudo rm -f /swapfile
-        echo "Swap空间已清理"
