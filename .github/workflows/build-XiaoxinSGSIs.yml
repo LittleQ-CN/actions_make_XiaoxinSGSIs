@@ -43,7 +43,23 @@ jobs:
         run: |
           sudo apt-get update
           # 安装基础工具和必要依赖
-          sudo apt-get install -y axel curl wget pv aria2 git make gcc libfuse-dev libssl-dev autoconf automake pkg-config e2fsprogs libcom-err2 libcom-err-dev
+          sudo apt-get install -y axel curl wget pv aria2 git make gcc libfuse-dev libssl-dev autoconf automake pkg-config e2fsprogs
+          
+          # 尝试安装 libcom-err-dev 或替代包
+          echo "🔍 查找 libcom-err-dev 或替代包..."
+          if apt-cache show libcom-err-dev > /dev/null 2>&1; then
+            echo "📦 安装 libcom-err-dev"
+            sudo apt-get install -y libcom-err-dev
+          elif apt-cache show libcomerr-dev > /dev/null 2>&1; then
+            echo "📦 安装 libcomerr-dev (替代包)"
+            sudo apt-get install -y libcomerr-dev
+          elif apt-cache show e2fsprogs-dev > /dev/null 2>&1; then
+            echo "📦 安装 e2fsprogs-dev (包含 libcom-err)"
+            sudo apt-get install -y e2fsprogs-dev
+          else
+            echo "⚠️ 无法找到 libcom-err-dev 或直接替代包，尝试安装相关开发包"
+            sudo apt-get install -y libext2fs-dev libblkid-dev libuuid-dev
+          fi
           
           # 设置axel配置
           echo "max-connections = 32" | sudo tee -a /etc/axelrc
@@ -66,7 +82,7 @@ jobs:
             # 方法2: 从源码编译安装
             echo "🔨 从源码编译安装 fuse-ext2..."
             
-            # 安装编译依赖
+            # 确保安装编译依赖
             sudo apt-get install -y libext2fs-dev
             
             # 克隆源码
