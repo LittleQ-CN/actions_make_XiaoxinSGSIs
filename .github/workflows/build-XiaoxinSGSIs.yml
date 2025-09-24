@@ -42,30 +42,39 @@ jobs:
       - name: "📦 Install Download Tools (安装下载工具)"
         run: |
           sudo apt-get update
-          # 安装基础工具
-          sudo apt-get install -y axel curl wget pv aria2 git make gcc libfuse-dev libssl-dev autoconf automake pkg-config e2fsprogs
+          sudo apt-get install -y axel curl wget pv aria2 git e2fsprogs
+          
+          # 设置axel配置
           echo "max-connections = 32" | sudo tee -a /etc/axelrc
           
-          # 从源码编译安装 fuse-ext2
-          echo "🔧 编译安装 fuse-ext2..."
-          git clone https://github.com/alperakcan/fuse-ext2.git
-          cd fuse-ext2
-          ./autogen.sh
-          if [ ! -f ./autogen.sh ]; then
-            # 如果autogen.sh不存在，使用aclocal和autoreconf
-            aclocal
-            autoreconf -i
-          fi
-          ./configure
-          make
-          sudo make install
+          # 下载预编译的 fuse-ext2
+          echo "🔧 下载预编译的 fuse-ext2..."
+          wget https://github.com/alperakcan/fuse-ext2/releases/download/v0.0.7/fuse-ext2-0.0.7-x86_64.deb
+          sudo dpkg -i fuse-ext2-0.0.7-x86_64.deb || sudo apt-get install -f -y
           sudo ldconfig
           
           # 测试是否安装成功
           if command -v fuse-ext2 &> /dev/null; then
             echo "✅ fuse-ext2 安装成功"
           else
-            echo "⚠️ fuse-ext2 安装可能有问题，但继续流程..."
+            echo "⚠️ fuse-ext2 安装失败，尝试从源码编译..."
+            
+            # 备用方案：从源码编译
+            sudo apt-get install -y libfuse-dev libssl-dev autoconf automake pkg-config libcom-err-dev
+            git clone https://github.com/alperakcan/fuse-ext2.git
+            cd fuse-ext2
+            ./autogen.sh || (aclocal && autoreconf -i)
+            ./configure --prefix=/usr
+            make
+            sudo make install
+            sudo ldconfig
+            
+            # 再次验证
+            if command -v fuse-ext2 &> /dev/null; then
+              echo "✅ fuse-ext2 源码编译安装成功"
+            else
+              echo "❌ fuse-ext2 安装失败，将使用 debugfs 作为替代"
+            fi
           fi
            
       - name: "⬇️ Download Build Tools (下载构建工具)"
@@ -143,7 +152,7 @@ jobs:
           echo "🚀 开始下载: $filename"
           max_retries=5
           
-          for i in (seq 1 $max_retries); do
+          for i in $(seq 1 $max_retries); do
             if command -v aria2c &> /dev/null; then
               echo "⚡ 使用aria2下载 [$filename] (32线程)"
               aria2c -x 32 -s 32 -k 1M --file-allocation=trunc -U "Mozilla/5.0" -o "$rom_path" "$rom_url" && echo "✅ 下载成功" && break || echo "❌ aria2失败，尝试axel"
