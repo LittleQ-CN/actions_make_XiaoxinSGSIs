@@ -42,9 +42,31 @@ jobs:
       - name: "📦 Install Download Tools (安装下载工具)"
         run: |
           sudo apt-get update
-          sudo apt-get install -y axel curl wget pv aria2 fuse-ext2
+          # 安装基础工具
+          sudo apt-get install -y axel curl wget pv aria2 git make gcc libfuse-dev libssl-dev autoconf automake pkg-config e2fsprogs
           echo "max-connections = 32" | sudo tee -a /etc/axelrc
-          echo "✅ 工具安装完成 (包括fuse-ext2)"
+          
+          # 从源码编译安装 fuse-ext2
+          echo "🔧 编译安装 fuse-ext2..."
+          git clone https://github.com/alperakcan/fuse-ext2.git
+          cd fuse-ext2
+          ./autogen.sh
+          if [ ! -f ./autogen.sh ]; then
+            # 如果autogen.sh不存在，使用aclocal和autoreconf
+            aclocal
+            autoreconf -i
+          fi
+          ./configure
+          make
+          sudo make install
+          sudo ldconfig
+          
+          # 测试是否安装成功
+          if command -v fuse-ext2 &> /dev/null; then
+            echo "✅ fuse-ext2 安装成功"
+          else
+            echo "⚠️ fuse-ext2 安装可能有问题，但继续流程..."
+          fi
            
       - name: "⬇️ Download Build Tools (下载构建工具)"
         run: |
@@ -243,233 +265,155 @@ jobs:
           
           echo "找到SGSI镜像: $system_img"
           
-          # 创建临时挂载点
-          mkdir -p /mnt/sgsi_temp
+          # 创建临时目录
+          mkdir -p /tmp/sgsi_info
           
-          # 尝试挂载镜像提取版本信息
-          extract_version() {
-            # 尝试使用fuse-ext2挂载
+          # 函数：使用fuse-ext2提取信息
+          extract_with_fuse_ext2() {
             if command -v fuse-ext2 &> /dev/null; then
-              echo "使用fuse-ext2挂载镜像..."
-              fuse-ext2 "$system_img" /mnt/sgsi_temp -o ro,allow_other
-              sleep 2
-              
+              echo "尝试使用fuse-ext2挂载镜像..."
+              mkdir -p /mnt/sgsi_temp
+              fuse-ext2 "$system_img" /mnt/sgsi_temp -o ro,allow_other && sleep 2
               if [ -f "/mnt/sgsi_temp/build.prop" ]; then
-                # 提取Android版本
-                android_version=$(grep -oP 'ro.build.version.release=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                
-                # 提取安全补丁日期
-                security_patch=$(grep -oP 'ro.build.version.security_patch=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                
-                # 提取构建日期
-                build_date=$(grep -oP 'ro.build.date=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                if [ -z "$build_date" ]; then
-                  build_date=$(grep -oP 'ro.build.date.utc=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                  if [ -n "$build_date" ]; then
-                    # 将UTC时间戳转换为可读日期
-                    build_date=$(date -d "@$build_date" +"%Y-%m-%d" 2>/dev/null || echo "UTC-$build_date")
-                  fi
-                fi
-                
-                # 提取构建ID
-                build_id=$(grep -oP 'ro.build.id=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                
-                # 提取ROM显示版本
-                rom_display=$(grep -oP 'ro.build.display.id=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                
-                # 提取MIUI版本（如果有）
-                miui_version=$(grep -oP 'ro.miui.ui.version.name=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                miui_code=$(grep -oP 'ro.miui.ui.version.code=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                
-                # 组合ROM版本信息
-                if [ -n "$miui_version" ]; then
-                  rom_version="MIUI${miui_version}"
-                  if [ -n "$miui_code" ]; then
-                    rom_version="${rom_version}_${miui_code}"
-                  fi
-                elif [ -n "$rom_display" ]; then
-                  rom_version="$rom_display"
-                else
-                  # 尝试从产品名称获取
-                  rom_version=$(grep -oP 'ro.product.name=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                  if [ -z "$rom_version" ]; then
-                    rom_version=$(grep -oP 'ro.product.system.name=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                  fi
-                fi
-                
+                cp /mnt/sgsi_temp/build.prop /tmp/sgsi_info/
                 fusermount -u /mnt/sgsi_temp
+                rmdir /mnt/sgsi_temp
                 return 0
               else
                 fusermount -u /mnt/sgsi_temp
+                rmdir /mnt/sgsi_temp
                 return 1
               fi
             else
-              echo "fuse-ext2不可用，尝试其他方法..."
               return 1
             fi
           }
           
-          # 尝试提取版本信息
-          if extract_version; then
-            # 设置Android版本
-            if [ -n "$android_version" ]; then
-              echo "提取的Android版本: $android_version"
-              echo "android_version=Android$android_version" >> $GITHUB_OUTPUT
+          # 函数：使用debugfs提取信息
+          extract_with_debugfs() {
+            if command -v debugfs &> /dev/null; then
+              echo "尝试使用debugfs提取build.prop..."
+              if debugfs -R "cat /build.prop" "$system_img" > /tmp/sgsi_info/build.prop 2>/dev/null; then
+                # 检查提取的文件是否包含build属性
+                if grep -q "ro.build" /tmp/sgsi_info/build.prop; then
+                  return 0
+                else
+                  return 1
+                fi
+              else
+                return 1
+              fi
             else
-              echo "无法提取Android版本，使用默认值"
-              echo "android_version=Android10" >> $GITHUB_OUTPUT
+              return 1
             fi
-            
-            # 设置安全补丁日期
-            if [ -n "$security_patch" ]; then
-              echo "提取的安全补丁日期: $security_patch"
-              echo "security_patch=$security_patch" >> $GITHUB_OUTPUT
+          }
+          
+          # 函数：从build.prop中提取信息
+          extract_info_from_build_prop() {
+            if [ -f /tmp/sgsi_info/build.prop ]; then
+              # 提取Android版本
+              android_version=$(grep -oP 'ro.build.version.release=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              # 提取安全补丁日期
+              security_patch=$(grep -oP 'ro.build.version.security_patch=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              # 提取构建日期
+              build_date=$(grep -oP 'ro.build.date=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              if [ -z "$build_date" ]; then
+                build_date=$(grep -oP 'ro.build.date.utc=\K.*' /tmp/sgsi_info/build.prop | head -1)
+                if [ -n "$build_date" ]; then
+                  build_date=$(date -d "@$build_date" +"%Y-%m-%d" 2>/dev/null || echo "UTC-$build_date")
+                fi
+              fi
+              # 提取构建ID
+              build_id=$(grep -oP 'ro.build.id=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              # 提取ROM显示版本
+              rom_display=$(grep -oP 'ro.build.display.id=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              # 提取MIUI版本
+              miui_version=$(grep -oP 'ro.miui.ui.version.name=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              miui_code=$(grep -oP 'ro.miui.ui.version.code=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              
+              # 组合ROM版本信息
+              if [ -n "$miui_version" ]; then
+                rom_version="MIUI${miui_version}"
+                if [ -n "$miui_code" ]; then
+                  rom_version="${rom_version}_${miui_code}"
+                fi
+              elif [ -n "$rom_display" ]; then
+                rom_version="$rom_display"
+              else
+                rom_version=$(grep -oP 'ro.product.name=\K.*' /tmp/sgsi_info/build.prop | head -1)
+                if [ -z "$rom_version" ]; then
+                  rom_version=$(grep -oP 'ro.product.system.name=\K.*' /tmp/sgsi_info/build.prop | head -1)
+                fi
+              fi
+              
+              # 设置输出
+              echo "android_version=${android_version:-Android10}" >> $GITHUB_OUTPUT
+              echo "rom_version=${rom_version:-Unknown}" >> $GITHUB_OUTPUT
+              echo "security_patch=${security_patch:-Unknown}" >> $GITHUB_OUTPUT
+              echo "build_date=${build_date:-Unknown}" >> $GITHUB_OUTPUT
+              echo "build_id=${build_id:-Unknown}" >> $GITHUB_OUTPUT
+              return 0
             else
-              echo "无法提取安全补丁日期"
-              echo "security_patch=Unknown" >> $GITHUB_OUTPUT
+              return 1
             fi
-            
-            # 设置构建日期
-            if [ -n "$build_date" ]; then
-              echo "提取的构建日期: $build_date"
-              echo "build_date=$build_date" >> $GITHUB_OUTPUT
-            else
-              echo "无法提取构建日期"
-              echo "build_date=Unknown" >> $GITHUB_OUTPUT
-            fi
-            
-            # 设置构建ID
-            if [ -n "$build_id" ]; then
-              echo "提取的构建ID: $build_id"
-              echo "build_id=$build_id" >> $GITHUB_OUTPUT
-            else
-              echo "无法提取构建ID"
-              echo "build_id=Unknown" >> $GITHUB_OUTPUT
-            fi
-            
-            # 设置ROM版本
-            if [ -n "$rom_version" ]; then
-              echo "提取的ROM版本: $rom_version"
-              clean_version=$(echo "$rom_version" | tr -cd '[:alnum:]._-')
-              echo "rom_version=$clean_version" >> $GITHUB_OUTPUT
-            else
-              echo "无法提取ROM版本，使用ROM文件名"
-              clean_name=$(echo "${{ steps.var.outputs.rom_name }}" | cut -d'.' -f1 | tr -cd '[:alnum:]._-')
-              echo "rom_version=$clean_name" >> $GITHUB_OUTPUT
-            fi
+          }
+          
+          # 尝试提取build.prop
+          if extract_with_fuse_ext2; then
+            echo "使用fuse-ext2提取成功"
+          elif extract_with_debugfs; then
+            echo "使用debugfs提取成功"
           else
-            echo "无法挂载镜像提取版本信息，尝试其他方法..."
-            
-            # 方法1: 从原始ROM文件名推断版本
+            echo "无法提取build.prop，使用备用方法"
+          fi
+          
+          # 从build.prop中提取信息
+          if [ -f /tmp/sgsi_info/build.prop ]; then
+            extract_info_from_build_prop
+          else
+            # 备用方法：从ROM文件名推断
             rom_name="${{ steps.var.outputs.rom_name }}"
-            
-            # 尝试从文件名中提取版本信息
             if echo "$rom_name" | grep -qi "android.*[0-9]"; then
               android_version=$(echo "$rom_name" | grep -oi "android.*[0-9]" | head -1 | tr '[:upper:]' '[:lower:]')
-              echo "从文件名推断Android版本: $android_version"
-              echo "android_version=$android_version" >> $GITHUB_OUTPUT
             else
-              echo "无法从文件名推断Android版本，使用默认值"
-              echo "android_version=Android10" >> $GITHUB_OUTPUT
+              android_version="Android10"
             fi
-            
-            # 设置默认值
+            clean_name=$(echo "$rom_name" | cut -d'.' -f1 | tr -cd '[:alnum:]._-')
+            echo "android_version=${android_version}" >> $GITHUB_OUTPUT
+            echo "rom_version=${clean_name}" >> $GITHUB_OUTPUT
             echo "security_patch=Unknown" >> $GITHUB_OUTPUT
             echo "build_date=Unknown" >> $GITHUB_OUTPUT
             echo "build_id=Unknown" >> $GITHUB_OUTPUT
-            
-            # 使用ROM文件名作为版本标识
-            clean_name=$(echo "$rom_name" | cut -d'.' -f1 | tr -cd '[:alnum:]._-')
-            echo "rom_version=$clean_name" >> $GITHUB_OUTPUT
           fi
           
-          # 清理临时目录
-          rm -rf /mnt/sgsi_temp
+          # 清理
+          rm -rf /tmp/sgsi_info
           echo "版本信息提取完成"
            
       - name: "🔍 Extract Device Info from SGSI (从SGSI镜像提取设备信息)"
         id: device_info
         run: |
-          echo "开始从SGSI镜像提取设备信息..."
+          echo "提取基础设备信息..."
           
-          # 查找SGSI镜像文件
-          sgsi_dir="SGSI-build-tool/10/SGSI"
-          system_img=$(find "$sgsi_dir" -name "system.img" -o -name "system_*.img" | head -1)
-          
-          if [ -z "$system_img" ]; then
-            echo "未找到SGSI镜像文件，使用默认设备信息"
-            echo "source_device=Unknown" >> $GITHUB_OUTPUT
-            echo "device_codename=Unknown" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          echo "找到SGSI镜像: $system_img"
-          
-          # 创建临时挂载点
-          mkdir -p /mnt/sgsi_temp
-          
-          # 尝试挂载镜像提取设备信息
-          extract_device_info() {
-            # 尝试使用fuse-ext2挂载
-            if command -v fuse-ext2 &> /dev/null; then
-              echo "使用fuse-ext2挂载镜像提取设备信息..."
-              fuse-ext2 "$system_img" /mnt/sgsi_temp -o ro,allow_other
-              sleep 2
-              
-              if [ -f "/mnt/sgsi_temp/build.prop" ]; then
-                # 提取设备型号
-                device_model=$(grep -oP 'ro.product.model=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                device_brand=$(grep -oP 'ro.product.brand=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                device_name=$(grep -oP 'ro.product.name=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                device_codename=$(grep -oP 'ro.product.device=\K.*' /mnt/sgsi_temp/build.prop | head -1)
-                
-                # 组合设备信息
-                if [ -n "$device_model" ] && [ -n "$device_brand" ]; then
-                  source_device="$device_brand $device_model"
-                  if [ -n "$device_codename" ]; then
-                    source_device="$source_device [$device_codename]"
-                  fi
-                elif [ -n "$device_name" ]; then
-                  source_device="$device_name"
-                  if [ -n "$device_codename" ]; then
-                    source_device="$source_device [$device_codename]"
-                  fi
-                else
-                  source_device="Unknown"
-                fi
-                
-                fusermount -u /mnt/sgsi_temp
-                return 0
-              else
-                fusermount -u /mnt/sgsi_temp
-                return 1
-              fi
-            else
-              echo "fuse-ext2不可用，无法提取设备信息"
-              return 1
-            fi
-          }
-          
-          # 尝试提取设备信息
-          if extract_device_info; then
-            if [ -n "$source_device" ] && [ "$source_device" != "Unknown" ]; then
-              echo "提取的设备信息: $source_device"
-              echo "source_device=$source_device" >> $GITHUB_OUTPUT
-              echo "device_codename=$device_codename" >> $GITHUB_OUTPUT
-            else
-              echo "无法提取设备信息，使用默认值"
-              echo "source_device=Unknown" >> $GITHUB_OUTPUT
-              echo "device_codename=Unknown" >> $GITHUB_OUTPUT
-            fi
+          # 简单地从之前步骤中可能已经提取的build.prop读取
+          if [ -f /tmp/sgsi_info/build.prop ]; then
+            device_codename=$(grep -oP 'ro.product.device=\K.*' /tmp/sgsi_info/build.prop | head -1 || echo "Unknown")
+            manufacturer=$(grep -oP 'ro.product.manufacturer=\K.*' /tmp/sgsi_info/build.prop | head -1 || echo "Unknown")
           else
-            echo "无法挂载镜像提取设备信息，使用默认值"
-            echo "source_device=Unknown" >> $GITHUB_OUTPUT
-            echo "device_codename=Unknown" >> $GITHUB_OUTPUT
+            device_codename="Unknown"
+            manufacturer="Unknown"
           fi
           
-          # 清理临时目录
-          rm -rf /mnt/sgsi_temp
-          echo "设备信息提取完成"
+          # 源设备通常与设备代号相同，或者我们可以用ROM名称
+          source_device="$device_codename"
+          if [ "$source_device" = "Unknown" ]; then
+            rom_name="${{ steps.var.outputs.rom_name }}"
+            source_device="${rom_name%.*}"  # 去掉文件扩展名
+          fi
+          
+          echo "source_device=${source_device}" >> $GITHUB_OUTPUT
+          echo "device_codename=${device_codename}" >> $GITHUB_OUTPUT
+          echo "device_manufacturer=${manufacturer}" >> $GITHUB_OUTPUT
 
       - name: "📦 Package Patches (打包补丁文件)"
         run: |
