@@ -54,7 +54,6 @@ jobs:
           
           max_retries=3
           for i in $(seq 1 $max_retries); do
-            # 首选curl（简洁进度条）
             if command -v curl &> /dev/null; then
               echo "⚡ 使用curl下载 [$filename]"
               if curl -# -fL -o "$filename" "$tool_url"; then
@@ -65,7 +64,6 @@ jobs:
               fi
             fi
             
-            # 备选aria2（多线程下载）
             if command -v aria2c &> /dev/null; then
               echo "⚡ 使用aria2下载 [$filename] (16线程)"
               if aria2c -x 16 -s 16 -k 1M --file-allocation=trunc -U "Mozilla/5.0" -o "$filename" "$tool_url"; then
@@ -76,53 +74,16 @@ jobs:
               fi
             fi
             
-            # 备选axel（精简进度条）
             if command -v axel &> /dev/null; then
               echo "⚡ 使用32线程Axel下载 [$filename]"
-              
-              # 获取文件大小
-              if size=$(curl -sI "$tool_url" | grep -i content-length | awk '{print $2}' | tr -d '\r'); then
-                echo "📊 文件大小: $((size / 1024 / 1024)) MB"
-              else
-                size=0
-              fi
-              
-              # 启动进度监控
-              start_progress_monitor() {
-                local file="$1"
-                local size="$2"
-                echo -n "📥 ${file}: 0%"
-                while true; do
-                  if [ -f "$file" ]; then
-                    current=$(du -b "$file" | cut -f1 2>/dev/null || echo 0)
-                    if [ "$size" -gt 0 ] && [ "$current" -gt 0 ]; then
-                      percent=$((current * 100 / size))
-                      # 避免百分比超过100
-                      if [ $percent -gt 100 ]; then percent=100; fi
-                      echo -ne "\r📥 ${file}: ${percent}%"
-                    fi
-                  fi
-                  sleep 0.5
-                done
-              }
-              
-              # 后台运行进度显示
-              start_progress_monitor "$filename" "$size" &
-              monitor_pid=$!
-              
-              # 运行axel下载（静默模式）
               if axel -q -n 32 -U "Mozilla/5.0" -s -k -o "$filename" "$tool_url"; then
-                kill $monitor_pid 2>/dev/null
-                echo -e "\r📥 ${filename}: 100%"
                 echo "✅ 下载成功"
                 break
               else
-                kill $monitor_pid 2>/dev/null
-                echo -e "\n❌ Axel失败，尝试wget"
+                echo "❌ Axel失败，尝试wget"
               fi
             fi
             
-            # 最后尝试wget
             if command -v wget &> /dev/null; then
               echo "⚡ 使用wget下载 [$filename]"
               if wget -q --show-progress -O "$filename" "$tool_url"; then
@@ -161,101 +122,24 @@ jobs:
           max_retries=5
           
           for i in $(seq 1 $max_retries); do
-            # 首选aria2（多线程下载）
             if command -v aria2c &> /dev/null; then
               echo "⚡ 使用aria2下载 [$filename] (32线程)"
-              # 使用简洁进度条（通过awk解析输出）
-              aria2c -x 32 -s 32 -k 1M --file-allocation=trunc -U "Mozilla/5.0" -o "$rom_path" "$rom_url" 2>&1 | \
-                awk '
-                  /\[#/ {
-                    gsub(/#/, "", $0)
-                    split($0, parts, /[()]/)
-                    if (length(parts) >= 2) {
-                      percent = substr(parts[1], length(parts[1])-4, 5)
-                      speed = parts[2]
-                      gsub(/ /, "", percent)
-                      gsub(/%|,/, "", percent)
-                      printf "\r📥 %s: %s%% (%s)", "'"$filename"'", percent, speed
-                    }
-                  }
-                  END {
-                    printf "\n"
-                  }'
-              if [ ${PIPESTATUS[0]} -eq 0 ]; then
-                echo "✅ 下载成功"
-                break
-              else
-                echo "❌ aria2失败，尝试axel"
-              fi
+              aria2c -x 32 -s 32 -k 1M --file-allocation=trunc -U "Mozilla/5.0" -o "$rom_path" "$rom_url" && echo "✅ 下载成功" && break || echo "❌ aria2失败，尝试axel"
             fi
             
-            # 备选axel（精简进度条）
             if command -v axel &> /dev/null; then
               echo "⚡ 使用32线程Axel下载 [$filename]"
-              
-              # 获取文件大小
-              if size=$(curl -sI "$rom_url" | grep -i content-length | awk '{print $2}' | tr -d '\r'); then
-                echo "📊 文件大小: $((size / 1024 / 1024)) MB"
-              else
-                size=0
-              fi
-              
-              # 启动进度监控
-              start_progress_monitor() {
-                local file="$1"
-                local size="$2"
-                local filename=$(basename "$file")
-                echo -n "📥 ${filename}: 0%"
-                while true; do
-                  if [ -f "$file" ]; then
-                    current=$(du -b "$file" | cut -f1 2>/dev/null || echo 0)
-                    if [ "$size" -gt 0 ] && [ "$current" -gt 0 ]; then
-                      percent=$((current * 100 / size))
-                      # 避免百分比超过100
-                      if [ $percent -gt 100 ]; then percent=100; fi
-                      echo -ne "\r📥 ${filename}: ${percent}%"
-                    fi
-                  fi
-                  sleep 0.5
-                done
-              }
-              
-              # 后台运行进度显示
-              start_progress_monitor "$rom_path" "$size" &
-              monitor_pid=$!
-              
-              # 运行axel下载（静默模式）
-              if axel -q -n 32 -U "Mozilla/5.0" -s -k -o "$rom_path" "$rom_url"; then
-                kill $monitor_pid 2>/dev/null
-                echo -e "\r📥 ${filename}: 100%"
-                echo "✅ 下载成功"
-                break
-              else
-                kill $monitor_pid 2>/dev/null
-                echo -e "\n❌ Axel失败，尝试curl"
-              fi
+              axel -q -n 32 -U "Mozilla/5.0" -s -k -o "$rom_path" "$rom_url" && echo "✅ 下载成功" && break || echo "❌ Axel失败，尝试curl"
             fi
             
-            # 备选curl（简洁进度条）
             if command -v curl &> /dev/null; then
               echo "⚡ 使用curl下载 [$filename]"
-              if curl -# -L -o "$rom_path" "$rom_url"; then
-                echo "✅ 下载成功"
-                break
-              else
-                echo "❌ curl失败，尝试wget"
-              fi
+              curl -# -L -o "$rom_path" "$rom_url" && echo "✅ 下载成功" && break || echo "❌ curl失败，尝试wget"
             fi
             
-            # 最后尝试wget
             if command -v wget &> /dev/null; then
               echo "⚡ 使用wget下载 [$filename]"
-              if wget -q --show-progress -O "$rom_path" "$rom_url"; then
-                echo "✅ 下载成功"
-                break
-              else
-                echo "❌ wget失败"
-              fi
+              wget -q --show-progress -O "$rom_path" "$rom_url" && echo "✅ 下载成功" && break || echo "❌ wget失败"
             fi
             
             if [ $i -lt $max_retries ]; then
@@ -269,7 +153,83 @@ jobs:
           
           echo -e "\n🎉 下载完成"
           echo "📦 文件大小: $(du -h "$rom_path" | cut -f1)"
-       
+
+      - name: "⚙️ Configure ROM Specific Settings (配置ROM特定设置)"
+        run: |
+          echo "开始配置ROM特定设置..."
+          
+          # Super SGSI配置
+          if [ "${{ steps.var.outputs.make_super }}" = "true" ]; then
+            echo "配置Super SGSI..."
+            sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
+            echo "Super SGSI配置完成"
+          fi
+          
+          # 删除旧的fixbug脚本（为后续配置做准备）
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+          
+          # MIUI配置
+          if [ "${{ steps.var.outputs.make_miui }}" = "true" ]; then
+            echo "配置MIUI..."
+            cp fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            echo "MIUI配置完成"
+          
+          # Flyme配置
+          elif [ "${{ steps.var.outputs.make_flyme }}" = "true" ]; then
+            echo "配置Flyme..."
+            cp fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            echo "Flyme配置完成"
+          
+          # ColorOS配置（特殊处理）
+          elif [ "${{ steps.var.outputs.make_coloros }}" = "true" ]; then
+            echo "配置ColorOS..."
+            echo "解密ColorOS OZIP包..."
+            sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
+            sudo rm -rf "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
+            cp fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            echo "ColorOS配置完成"
+          
+          # H2OS配置
+          elif [ "${{ steps.var.outputs.make_h2os }}" = "true" ]; then
+            echo "配置H2OS..."
+            cp fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            echo "H2OS配置完成"
+          
+          # SmartisanOS配置
+          elif [ "${{ steps.var.outputs.make_smartisanos }}" = "true" ]; then
+            echo "配置SmartisanOS..."
+            cp fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            echo "SmartisanOS配置完成"
+          
+          # ZUI配置
+          elif [ "${{ steps.var.outputs.make_zui }}" = "true" ]; then
+            echo "配置ZUI..."
+            cp fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            echo "ZUI配置完成"
+          
+          else
+            echo "未选择特定ROM配置，使用默认设置"
+          fi
+          
+          echo "ROM特定设置配置完成"
+            
+      - name: "🛠️ Build SGSI Images (构建SGSI镜像)"
+        run: |
+          rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
+          mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
+          mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
+          cd SGSI-build-tool/10
+          sudo bash make.sh
+          echo "🎉 SGSI镜像构建完成"
+           
+      - name: "📦 Package Patches (打包补丁文件)"
+        run: |
+          zip -r Patch1.zip Patch/Patch1/*
+          zip -r Patch2.zip Patch/Patch2/*
+          zip -r Patch3.zip Patch/Patch3/*
+          sudo mv Patch1.zip Patch2.zip Patch3.zip SGSI-build-tool/10/SGSI/
+          echo "✅ 补丁文件打包完成"
+
       - name: "📦 Package SGSI Output (打包SGSI输出)"
         run: |
           mkdir -p upload
