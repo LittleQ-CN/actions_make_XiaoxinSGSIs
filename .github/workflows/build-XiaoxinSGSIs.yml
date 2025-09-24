@@ -16,7 +16,7 @@ jobs:
       - name: "🧹 Clean Up Environment (清理环境)"
         run: |
           docker rmi -f $(docker images -q) || true
-          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
+          sudo rm -rf /usr/share.docker /etc/mysql /etc/php /etc/apt/sources.list.d
           sudo -E apt-get -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* powershell openjdk* mysql* php* || true
           sudo -E apt-get update
           sudo -E apt-get -y autoremove --purge
@@ -42,73 +42,43 @@ jobs:
       - name: "📦 Install Download Tools (安装下载工具)"
         run: |
           sudo apt-get update
-          # 安装基础工具和必要依赖
-          sudo apt-get install -y axel curl wget pv aria2 git make gcc libfuse-dev libssl-dev autoconf automake pkg-config e2fsprogs
           
-          # 尝试安装 libcom-err-dev 或替代包
-          echo "🔍 查找 libcom-err-dev 或替代包..."
-          if apt-cache show libcom-err-dev > /dev/null 2>&1; then
-            echo "📦 安装 libcom-err-dev"
-            sudo apt-get install -y libcom-err-dev
-          elif apt-cache show libcomerr-dev > /dev/null 2>&1; then
-            echo "📦 安装 libcomerr-dev (替代包)"
-            sudo apt-get install -y libcomerr-dev
-          elif apt-cache show e2fsprogs-dev > /dev/null 2>&1; then
-            echo "📦 安装 e2fsprogs-dev (包含 libcom-err)"
-            sudo apt-get install -y e2fsprogs-dev
-          else
-            echo "⚠️ 无法找到 libcom-err-dev 或直接替代包，尝试安装相关开发包"
-            sudo apt-get install -y libext2fs-dev libblkid-dev libuuid-dev
-          fi
+          # 安装基础工具和必要依赖
+          echo "🔧 安装基础构建工具..."
+          sudo apt-get install -y axel curl wget pv aria2 git make gcc libfuse-dev libssl-dev autoconf automake pkg-config
+          
+          # 安装 e2fsprogs（包含 debugfs 工具）
+          echo "📦 安装 e2fsprogs (包含 debugfs)..."
+          sudo apt-get install -y e2fsprogs
+          
+          # 安装其他可能需要的库
+          echo "📦 安装其他必要的库..."
+          sudo apt-get install -y libext2fs-dev libblkid-dev libuuid-dev
           
           # 设置axel配置
           echo "max-connections = 32" | sudo tee -a /etc/axelrc
           
-          # 安装 fuse-ext2 - 使用多种方法确保成功
-          echo "🔧 安装 fuse-ext2..."
-          
-          # 方法1: 尝试从 Ubuntu 仓库安装（如果可用）
-          if apt-cache show fuse-ext2 > /dev/null 2>&1; then
-            echo "📦 从 Ubuntu 仓库安装 fuse-ext2"
-            sudo apt-get install -y fuse-ext2
+          # 检查 debugfs 是否可用
+          echo "🔍 检查 debugfs 工具..."
+          if command -v debugfs &> /dev/null; then
+            echo "✅ debugfs 已安装，版本: $(debugfs -V 2>&1 | head -1 || echo '可用')"
           else
-            echo "⚠️ Ubuntu 仓库中没有 fuse-ext2，尝试其他方法"
+            echo "❌ debugfs 未安装，尝试重新安装 e2fsprogs"
+            sudo apt-get install --reinstall -y e2fsprogs
           fi
           
-          # 检查是否安装成功
-          if command -v fuse-ext2 &> /dev/null; then
-            echo "✅ fuse-ext2 已通过包管理器安装"
-          else
-            # 方法2: 从源码编译安装
-            echo "🔨 从源码编译安装 fuse-ext2..."
-            
-            # 确保安装编译依赖
-            sudo apt-get install -y libext2fs-dev
-            
-            # 克隆源码
-            git clone https://github.com/alperakcan/fuse-ext2.git
-            cd fuse-ext2
-            
-            # 配置和编译
-            ./autogen.sh || (aclocal && autoreconf -i)
-            ./configure --prefix=/usr
-            make
-            sudo make install
-            sudo ldconfig
-            
-            # 检查编译是否成功
-            if command -v fuse-ext2 &> /dev/null; then
-              echo "✅ fuse-ext2 源码编译安装成功"
+          # 检查是否已安装必要的开发库
+          echo "🔍 检查必要的开发库..."
+          for lib in libext2fs libblkid libuuid; do
+            if ldconfig -p | grep -q $lib; then
+              echo "✅ $lib 库已安装"
             else
-              echo "⚠️ fuse-ext2 安装失败，将使用 debugfs 作为替代"
+              echo "⚠️ $lib 库未找到，尝试安装相关包"
+              sudo apt-get install -y ${lib}2
             fi
-          fi
+          done
           
-          # 确保 debugfs 可用
-          if ! command -v debugfs &> /dev/null; then
-            echo "📦 安装 debugfs (e2fsprogs)"
-            sudo apt-get install -y e2fsprogs
-          fi
+          echo "✅ 所有必要工具安装完成"
            
       - name: "⬇️ Download Build Tools (下载构建工具)"
         run: |
@@ -310,108 +280,65 @@ jobs:
           # 创建临时目录
           mkdir -p /tmp/sgsi_info
           
-          # 函数：使用fuse-ext2提取信息
-          extract_with_fuse_ext2() {
-            if command -v fuse-ext2 &> /dev/null; then
-              echo "尝试使用fuse-ext2挂载镜像..."
-              mkdir -p /mnt/sgsi_temp
-              fuse-ext2 "$system_img" /mnt/sgsi_temp -o ro,allow_other && sleep 2
-              if [ -f "/mnt/sgsi_temp/build.prop" ]; then
-                cp /mnt/sgsi_temp/build.prop /tmp/sgsi_info/
-                fusermount -u /mnt/sgsi_temp
-                rmdir /mnt/sgsi_temp
-                return 0
+          # 使用debugfs提取信息
+          echo "🔧 使用debugfs提取build.prop..."
+          if command -v debugfs &> /dev/null; then
+            if debugfs -R "cat /build.prop" "$system_img" > /tmp/sgsi_info/build.prop 2>/dev/null; then
+              # 检查提取的文件是否包含build属性
+              if grep -q "ro.build" /tmp/sgsi_info/build.prop; then
+                echo "✅ debugfs提取成功"
               else
-                fusermount -u /mnt/sgsi_temp
-                rmdir /mnt/sgsi_temp
-                return 1
+                echo "❌ debugfs提取的文件不包含build属性"
+                rm /tmp/sgsi_info/build.prop
               fi
             else
-              return 1
+              echo "❌ debugfs提取失败"
             fi
-          }
-          
-          # 函数：使用debugfs提取信息
-          extract_with_debugfs() {
-            if command -v debugfs &> /dev/null; then
-              echo "尝试使用debugfs提取build.prop..."
-              if debugfs -R "cat /build.prop" "$system_img" > /tmp/sgsi_info/build.prop 2>/dev/null; then
-                # 检查提取的文件是否包含build属性
-                if grep -q "ro.build" /tmp/sgsi_info/build.prop; then
-                  return 0
-                else
-                  return 1
-                fi
-              else
-                return 1
-              fi
-            else
-              return 1
-            fi
-          }
-          
-          # 函数：从build.prop中提取信息
-          extract_info_from_build_prop() {
-            if [ -f /tmp/sgsi_info/build.prop ]; then
-              # 提取Android版本
-              android_version=$(grep -oP 'ro.build.version.release=\K.*' /tmp/sgsi_info/build.prop | head -1)
-              # 提取安全补丁日期
-              security_patch=$(grep -oP 'ro.build.version.security_patch=\K.*' /tmp/sgsi_info/build.prop | head -1)
-              # 提取构建日期
-              build_date=$(grep -oP 'ro.build.date=\K.*' /tmp/sgsi_info/build.prop | head -1)
-              if [ -z "$build_date" ]; then
-                build_date=$(grep -oP 'ro.build.date.utc=\K.*' /tmp/sgsi_info/build.prop | head -1)
-                if [ -n "$build_date" ]; then
-                  build_date=$(date -d "@$build_date" +"%Y-%m-%d" 2>/dev/null || echo "UTC-$build_date")
-                fi
-              fi
-              # 提取构建ID
-              build_id=$(grep -oP 'ro.build.id=\K.*' /tmp/sgsi_info/build.prop | head -1)
-              # 提取ROM显示版本
-              rom_display=$(grep -oP 'ro.build.display.id=\K.*' /tmp/sgsi_info/build.prop | head -1)
-              # 提取MIUI版本
-              miui_version=$(grep -oP 'ro.miui.ui.version.name=\K.*' /tmp/sgsi_info/build.prop | head -1)
-              miui_code=$(grep -oP 'ro.miui.ui.version.code=\K.*' /tmp/sgsi_info/build.prop | head -1)
-              
-              # 组合ROM版本信息
-              if [ -n "$miui_version" ]; then
-                rom_version="MIUI${miui_version}"
-                if [ -n "$miui_code" ]; then
-                  rom_version="${rom_version}_${miui_code}"
-                fi
-              elif [ -n "$rom_display" ]; then
-                rom_version="$rom_display"
-              else
-                rom_version=$(grep -oP 'ro.product.name=\K.*' /tmp/sgsi_info/build.prop | head -1)
-                if [ -z "$rom_version" ]; then
-                  rom_version=$(grep -oP 'ro.product.system.name=\K.*' /tmp/sgsi_info/build.prop | head -1)
-                fi
-              fi
-              
-              # 设置输出
-              echo "android_version=${android_version:-Android10}" >> $GITHUB_OUTPUT
-              echo "rom_version=${rom_version:-Unknown}" >> $GITHUB_OUTPUT
-              echo "security_patch=${security_patch:-Unknown}" >> $GITHUB_OUTPUT
-              echo "build_date=${build_date:-Unknown}" >> $GITHUB_OUTPUT
-              echo "build_id=${build_id:-Unknown}" >> $GITHUB_OUTPUT
-              return 0
-            else
-              return 1
-            fi
-          }
-          
-          # 尝试提取build.prop
-          if extract_with_fuse_ext2; then
-            echo "使用fuse-ext2提取成功"
-          elif extract_with_debugfs; then
-            echo "使用debugfs提取成功"
-          else
-            echo "无法提取build.prop，使用备用方法"
           fi
           
           # 从build.prop中提取信息
           if [ -f /tmp/sgsi_info/build.prop ]; then
-            extract_info_from_build_prop
+            # 提取Android版本
+            android_version=$(grep -oP 'ro.build.version.release=\K.*' /tmp/sgsi_info/build.prop | head -1)
+            # 提取安全补丁日期
+            security_patch=$(grep -oP 'ro.build.version.security_patch=\K.*' /tmp/sgsi_info/build.prop | head -1)
+            # 提取构建日期
+            build_date=$(grep -oP 'ro.build.date=\K.*' /tmp/sgsi_info/build.prop | head -1)
+            if [ -z "$build_date" ]; then
+              build_date=$(grep -oP 'ro.build.date.utc=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              if [ -n "$build_date" ]; then
+                build_date=$(date -d "@$build_date" +"%Y-%m-%d" 2>/dev/null || echo "UTC-$build_date")
+              fi
+            fi
+            # 提取构建ID
+            build_id=$(grep -oP 'ro.build.id=\K.*' /tmp/sgsi_info/build.prop | head -1)
+            # 提取ROM显示版本
+            rom_display=$(grep -oP 'ro.build.display.id=\K.*' /tmp/sgsi_info/build.prop | head -1)
+            # 提取MIUI版本
+            miui_version=$(grep -oP 'ro.miui.ui.version.name=\K.*' /tmp/sgsi_info/build.prop | head -1)
+            miui_code=$(grep -oP 'ro.miui.ui.version.code=\K.*' /tmp/sgsi_info/build.prop | head -1)
+            
+            # 组合ROM版本信息
+            if [ -n "$miui_version" ]; then
+              rom_version="MIUI${miui_version}"
+              if [ -n "$miui_code" ]; then
+                rom_version="${rom_version}_${miui_code}"
+              fi
+            elif [ -n "$rom_display" ]; then
+              rom_version="$rom_display"
+            else
+              rom_version=$(grep -oP 'ro.product.name=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              if [ -z "$rom_version" ]; then
+                rom_version=$(grep -oP 'ro.product.system.name=\K.*' /tmp/sgsi_info/build.prop | head -1)
+              fi
+            fi
+            
+            # 设置输出
+            echo "android_version=${android_version:-Android10}" >> $GITHUB_OUTPUT
+            echo "rom_version=${rom_version:-Unknown}" >> $GITHUB_OUTPUT
+            echo "security_patch=${security_patch:-Unknown}" >> $GITHUB_OUTPUT
+            echo "build_date=${build_date:-Unknown}" >> $GITHUB_OUTPUT
+            echo "build_id=${build_id:-Unknown}" >> $GITHUB_OUTPUT
           else
             # 备用方法：从ROM文件名推断
             rom_name="${{ steps.var.outputs.rom_name }}"
