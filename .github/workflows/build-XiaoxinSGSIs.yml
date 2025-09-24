@@ -42,9 +42,9 @@ jobs:
       - name: "📦 Install Download Tools (安装下载工具)"
         run: |
           sudo apt-get update
-          sudo apt-get install -y axel curl wget pv aria2
+          sudo apt-get install -y axel curl wget pv aria2 fuse-ext2
           echo "max-connections = 32" | sudo tee -a /etc/axelrc
-          echo "✅ 工具安装完成"
+          echo "✅ 工具安装完成 (包括fuse-ext2)"
            
       - name: "⬇️ Download Build Tools (下载构建工具)"
         run: |
@@ -121,7 +121,7 @@ jobs:
           echo "🚀 开始下载: $filename"
           max_retries=5
           
-          for i in $(seq 1 $max_retries); do
+          for i in (seq 1 $max_retries); do
             if command -v aria2c &> /dev/null; then
               echo "⚡ 使用aria2下载 [$filename] (32线程)"
               aria2c -x 32 -s 32 -k 1M --file-allocation=trunc -U "Mozilla/5.0" -o "$rom_path" "$rom_url" && echo "✅ 下载成功" && break || echo "❌ aria2失败，尝试axel"
@@ -221,7 +221,256 @@ jobs:
           cd SGSI-build-tool/10
           sudo bash make.sh
           echo "🎉 SGSI镜像构建完成"
+
+      - name: "🔍 Extract Version Info from SGSI (从SGSI镜像提取版本信息)"
+        id: sgsi_info
+        run: |
+          echo "开始从SGSI镜像提取版本信息..."
+          
+          # 查找SGSI镜像文件
+          sgsi_dir="SGSI-build-tool/10/SGSI"
+          system_img=$(find "$sgsi_dir" -name "system.img" -o -name "system_*.img" | head -1)
+          
+          if [ -z "$system_img" ]; then
+            echo "未找到SGSI镜像文件，使用默认版本信息"
+            echo "android_version=Android10" >> $GITHUB_OUTPUT
+            echo "rom_version=Unknown" >> $GITHUB_OUTPUT
+            echo "security_patch=Unknown" >> $GITHUB_OUTPUT
+            echo "build_date=Unknown" >> $GITHUB_OUTPUT
+            echo "build_id=Unknown" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "找到SGSI镜像: $system_img"
+          
+          # 创建临时挂载点
+          mkdir -p /mnt/sgsi_temp
+          
+          # 尝试挂载镜像提取版本信息
+          extract_version() {
+            # 尝试使用fuse-ext2挂载
+            if command -v fuse-ext2 &> /dev/null; then
+              echo "使用fuse-ext2挂载镜像..."
+              fuse-ext2 "$system_img" /mnt/sgsi_temp -o ro,allow_other
+              sleep 2
+              
+              if [ -f "/mnt/sgsi_temp/build.prop" ]; then
+                # 提取Android版本
+                android_version=$(grep -oP 'ro.build.version.release=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                
+                # 提取安全补丁日期
+                security_patch=$(grep -oP 'ro.build.version.security_patch=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                
+                # 提取构建日期
+                build_date=$(grep -oP 'ro.build.date=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                if [ -z "$build_date" ]; then
+                  build_date=$(grep -oP 'ro.build.date.utc=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                  if [ -n "$build_date" ]; then
+                    # 将UTC时间戳转换为可读日期
+                    build_date=$(date -d "@$build_date" +"%Y-%m-%d" 2>/dev/null || echo "UTC-$build_date")
+                  fi
+                fi
+                
+                # 提取构建ID
+                build_id=$(grep -oP 'ro.build.id=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                
+                # 提取ROM显示版本
+                rom_display=$(grep -oP 'ro.build.display.id=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                
+                # 提取MIUI版本（如果有）
+                miui_version=$(grep -oP 'ro.miui.ui.version.name=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                miui_code=$(grep -oP 'ro.miui.ui.version.code=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                
+                # 组合ROM版本信息
+                if [ -n "$miui_version" ]; then
+                  rom_version="MIUI${miui_version}"
+                  if [ -n "$miui_code" ]; then
+                    rom_version="${rom_version}_${miui_code}"
+                  fi
+                elif [ -n "$rom_display" ]; then
+                  rom_version="$rom_display"
+                else
+                  # 尝试从产品名称获取
+                  rom_version=$(grep -oP 'ro.product.name=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                  if [ -z "$rom_version" ]; then
+                    rom_version=$(grep -oP 'ro.product.system.name=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                  fi
+                fi
+                
+                fusermount -u /mnt/sgsi_temp
+                return 0
+              else
+                fusermount -u /mnt/sgsi_temp
+                return 1
+              fi
+            else
+              echo "fuse-ext2不可用，尝试其他方法..."
+              return 1
+            fi
+          }
+          
+          # 尝试提取版本信息
+          if extract_version; then
+            # 设置Android版本
+            if [ -n "$android_version" ]; then
+              echo "提取的Android版本: $android_version"
+              echo "android_version=Android$android_version" >> $GITHUB_OUTPUT
+            else
+              echo "无法提取Android版本，使用默认值"
+              echo "android_version=Android10" >> $GITHUB_OUTPUT
+            fi
+            
+            # 设置安全补丁日期
+            if [ -n "$security_patch" ]; then
+              echo "提取的安全补丁日期: $security_patch"
+              echo "security_patch=$security_patch" >> $GITHUB_OUTPUT
+            else
+              echo "无法提取安全补丁日期"
+              echo "security_patch=Unknown" >> $GITHUB_OUTPUT
+            fi
+            
+            # 设置构建日期
+            if [ -n "$build_date" ]; then
+              echo "提取的构建日期: $build_date"
+              echo "build_date=$build_date" >> $GITHUB_OUTPUT
+            else
+              echo "无法提取构建日期"
+              echo "build_date=Unknown" >> $GITHUB_OUTPUT
+            fi
+            
+            # 设置构建ID
+            if [ -n "$build_id" ]; then
+              echo "提取的构建ID: $build_id"
+              echo "build_id=$build_id" >> $GITHUB_OUTPUT
+            else
+              echo "无法提取构建ID"
+              echo "build_id=Unknown" >> $GITHUB_OUTPUT
+            fi
+            
+            # 设置ROM版本
+            if [ -n "$rom_version" ]; then
+              echo "提取的ROM版本: $rom_version"
+              clean_version=$(echo "$rom_version" | tr -cd '[:alnum:]._-')
+              echo "rom_version=$clean_version" >> $GITHUB_OUTPUT
+            else
+              echo "无法提取ROM版本，使用ROM文件名"
+              clean_name=$(echo "${{ steps.var.outputs.rom_name }}" | cut -d'.' -f1 | tr -cd '[:alnum:]._-')
+              echo "rom_version=$clean_name" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "无法挂载镜像提取版本信息，尝试其他方法..."
+            
+            # 方法1: 从原始ROM文件名推断版本
+            rom_name="${{ steps.var.outputs.rom_name }}"
+            
+            # 尝试从文件名中提取版本信息
+            if echo "$rom_name" | grep -qi "android.*[0-9]"; then
+              android_version=$(echo "$rom_name" | grep -oi "android.*[0-9]" | head -1 | tr '[:upper:]' '[:lower:]')
+              echo "从文件名推断Android版本: $android_version"
+              echo "android_version=$android_version" >> $GITHUB_OUTPUT
+            else
+              echo "无法从文件名推断Android版本，使用默认值"
+              echo "android_version=Android10" >> $GITHUB_OUTPUT
+            fi
+            
+            # 设置默认值
+            echo "security_patch=Unknown" >> $GITHUB_OUTPUT
+            echo "build_date=Unknown" >> $GITHUB_OUTPUT
+            echo "build_id=Unknown" >> $GITHUB_OUTPUT
+            
+            # 使用ROM文件名作为版本标识
+            clean_name=$(echo "$rom_name" | cut -d'.' -f1 | tr -cd '[:alnum:]._-')
+            echo "rom_version=$clean_name" >> $GITHUB_OUTPUT
+          fi
+          
+          # 清理临时目录
+          rm -rf /mnt/sgsi_temp
+          echo "版本信息提取完成"
            
+      - name: "🔍 Extract Device Info from SGSI (从SGSI镜像提取设备信息)"
+        id: device_info
+        run: |
+          echo "开始从SGSI镜像提取设备信息..."
+          
+          # 查找SGSI镜像文件
+          sgsi_dir="SGSI-build-tool/10/SGSI"
+          system_img=$(find "$sgsi_dir" -name "system.img" -o -name "system_*.img" | head -1)
+          
+          if [ -z "$system_img" ]; then
+            echo "未找到SGSI镜像文件，使用默认设备信息"
+            echo "source_device=Unknown" >> $GITHUB_OUTPUT
+            echo "device_codename=Unknown" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "找到SGSI镜像: $system_img"
+          
+          # 创建临时挂载点
+          mkdir -p /mnt/sgsi_temp
+          
+          # 尝试挂载镜像提取设备信息
+          extract_device_info() {
+            # 尝试使用fuse-ext2挂载
+            if command -v fuse-ext2 &> /dev/null; then
+              echo "使用fuse-ext2挂载镜像提取设备信息..."
+              fuse-ext2 "$system_img" /mnt/sgsi_temp -o ro,allow_other
+              sleep 2
+              
+              if [ -f "/mnt/sgsi_temp/build.prop" ]; then
+                # 提取设备型号
+                device_model=$(grep -oP 'ro.product.model=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                device_brand=$(grep -oP 'ro.product.brand=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                device_name=$(grep -oP 'ro.product.name=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                device_codename=$(grep -oP 'ro.product.device=\K.*' /mnt/sgsi_temp/build.prop | head -1)
+                
+                # 组合设备信息
+                if [ -n "$device_model" ] && [ -n "$device_brand" ]; then
+                  source_device="$device_brand $device_model"
+                  if [ -n "$device_codename" ]; then
+                    source_device="$source_device [$device_codename]"
+                  fi
+                elif [ -n "$device_name" ]; then
+                  source_device="$device_name"
+                  if [ -n "$device_codename" ]; then
+                    source_device="$source_device [$device_codename]"
+                  fi
+                else
+                  source_device="Unknown"
+                fi
+                
+                fusermount -u /mnt/sgsi_temp
+                return 0
+              else
+                fusermount -u /mnt/sgsi_temp
+                return 1
+              fi
+            else
+              echo "fuse-ext2不可用，无法提取设备信息"
+              return 1
+            fi
+          }
+          
+          # 尝试提取设备信息
+          if extract_device_info; then
+            if [ -n "$source_device" ] && [ "$source_device" != "Unknown" ]; then
+              echo "提取的设备信息: $source_device"
+              echo "source_device=$source_device" >> $GITHUB_OUTPUT
+              echo "device_codename=$device_codename" >> $GITHUB_OUTPUT
+            else
+              echo "无法提取设备信息，使用默认值"
+              echo "source_device=Unknown" >> $GITHUB_OUTPUT
+              echo "device_codename=Unknown" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "无法挂载镜像提取设备信息，使用默认值"
+            echo "source_device=Unknown" >> $GITHUB_OUTPUT
+            echo "device_codename=Unknown" >> $GITHUB_OUTPUT
+          fi
+          
+          # 清理临时目录
+          rm -rf /mnt/sgsi_temp
+          echo "设备信息提取完成"
+
       - name: "📦 Package Patches (打包补丁文件)"
         run: |
           zip -r Patch1.zip Patch/Patch1/*
@@ -249,11 +498,80 @@ jobs:
           
           echo "📁 上传目录内容:"
           ls -lh "upload"
+
+      - name: "📝 Generate Release Notes (生成发布说明)"
+        id: release_notes
+        run: |
+          # 获取当前日期作为发布日期
+          release_date=$(date +"%Y-%m-%d")
+          release_date_tag=$(date +"%Y%m%d")
+          
+          # 计算系统大小（SGSI目录的大小）
+          system_size=$(du -sh SGSI-build-tool/10/SGSI | awk '{print $1}')
+          
+          # 计算压缩包大小
+          zip_file="${{ steps.var.outputs.pack_sgsi }}"
+          if [ -f "$zip_file" ]; then
+            zip_size=$(du -h "$zip_file" | awk '{print $1}')
+          else
+            # 检查上传目录
+            if [ -f "upload/$zip_file" ]; then
+              zip_size=$(du -h "upload/$zip_file" | awk '{print $1}')
+            else
+              # 如果分割了，则计算所有分卷的总大小
+              parts=$(ls upload/${zip_file}_* 2>/dev/null | wc -l)
+              if [ $parts -gt 0 ]; then
+                total_size=0
+                for part in upload/${zip_file}_*; do
+                  part_size=$(du -b "$part" | awk '{print $1}')
+                  total_size=$((total_size + part_size))
+                done
+                zip_size=$(echo "$total_size" | awk '{ split( "B KB MB GB" , v ); s=1; while( $1>1024 ){ $1/=1024; s++ } printf "%.2f %s", $1, v[s] }')
+                zip_size="$zip_size (分割为 $parts 部分)"
+              else
+                zip_size="未知"
+              fi
+            fi
+          fi
+          
+          # 生成发布说明文件
+          cat > release_notes.md << EOF
+          # xiaoxinSGSI 发布信息
+          
+          ## 基本信息
+          - **系统**: ${{ steps.sgsi_info.outputs.android_version }}
+          - **系统版本**: ${{ steps.sgsi_info.outputs.rom_version }}
+          - **从哪个机型移植**: ${{ steps.device_info.outputs.source_device }}
+          - **设备代号**: ${{ steps.device_info.outputs.device_codename }}
+          - **原构建日期**: ${{ steps.sgsi_info.outputs.build_date }}
+          - **安全补丁**: ${{ steps.sgsi_info.outputs.security_patch }}
+          
+          ## 大小信息
+          - **系统大小**: ${system_size}
+          - **压缩包大小**: ${zip_size}
+          - **发布日期**: ${release_date}
+          
+          ## 构建信息
+          - **构建ID**: ${{ steps.sgsi_info.outputs.build_id }}
+          EOF
+          
+          # 输出发布说明内容
+          cat release_notes.md
+          
+          # 将发布说明文件移动到上传目录
+          mv release_notes.md upload/
+          
+          # 设置输出变量
+          echo "release_date=${release_date}" >> $GITHUB_OUTPUT
+          echo "release_date_tag=${release_date_tag}" >> $GITHUB_OUTPUT
+          echo "system_size=${system_size}" >> $GITHUB_OUTPUT
+          echo "zip_size=${zip_size}" >> $GITHUB_OUTPUT
              
       - name: "🚀 Upload Build Artifacts (上传构建产物)"
         uses: ncipollo/release-action@v1.11.0
         with:
           artifacts: upload/*
-          name: xiaoxinSGSI-ab-Android10-unpack
-          tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}
+          name: ${{ steps.sgsi_info.outputs.rom_version }}
+          tag: ${{ steps.release_notes.outputs.release_date_tag }}_${{ steps.sgsi_info.outputs.rom_version }}
+          bodyFile: upload/release_notes.md
           token: ${{ secrets.GITHUB_TOKEN }}
