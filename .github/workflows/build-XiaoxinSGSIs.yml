@@ -10,137 +10,255 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-       - name: Checkout
-         uses: actions/checkout@v4  # 更新为固定版本
+      - name: Checkout Code (检出代码)
+        uses: actions/checkout@v4
        
-       - name: Clean Up
-         run: |
-           docker rmi -f $(docker images -q) || true  # 添加错误处理
-           sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
-           sudo -E apt-get -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* powershell openjdk* mysql* php* || true
-           sudo -E apt-get update
-           sudo -E apt-get -y autoremove --purge
-           sudo -E apt-get clean 
-           df -h
+      - name: Clean Up Environment (清理环境)
+        run: |
+          # Remove all Docker images (清除所有Docker镜像)
+          docker rmi -f $(docker images -q) || true
+          # Remove unnecessary files (清除不必要的文件)
+          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
+          # Purge unnecessary packages (清除不必要的软件包)
+          sudo -E apt-get -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* powershell openjdk* mysql* php* || true
+          # Update and clean apt cache (更新并清理apt缓存)
+          sudo -E apt-get update
+          sudo -E apt-get -y autoremove --purge
+          sudo -E apt-get clean 
+          # Show disk space usage (显示磁盘空间使用情况)
+          df -h
        
-       - name: Get variables
-         run: |
-           echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUTPUT
-           echo "rom_name=$(jq -r '.rom_name' sgsi.json)" >> $GITHUB_OUTPUT
-           echo "pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)" >> $GITHUB_OUTPUT
-           echo "make_miui=$(jq -r '.make_miui' sgsi.json)" >> $GITHUB_OUTPUT
-           echo "make_flyme=$(jq -r '.make_flyme' sgsi.json)" >> $GITHUB_OUTPUT
-           echo "make_coloros=$(jq -r '.make_coloros' sgsi.json)" >> $GITHUB_OUTPUT
-           echo "make_h2os=$(jq -r '.make_h2os' sgsi.json)" >> $GITHUB_OUTPUT
-           echo "make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)" >> $GITHUB_OUTPUT
-           echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
-           echo "make_super=$(jq -r '.make_super' sgsi.json)" >> $GITHUB_OUTPUT
-         id: var
+      - name: Get Configuration Variables (获取配置变量)
+        run: |
+          echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "rom_name=$(jq -r '.rom_name' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "make_miui=$(jq -r '.make_miui' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "make_flyme=$(jq -r '.make_flyme' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "make_coloros=$(jq -r '.make_coloros' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "make_h2os=$(jq -r '.make_h2os' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "make_super=$(jq -r '.make_super' sgsi.json)" >> $GITHUB_OUTPUT
+        id: var
            
-       - name: 下载构建工具
-         run: |
-           tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
-           echo "下载构建工具: $tool_url"
+      - name: Install Download Tools (安装下载工具)
+        run: |
+          # Install Axel, curl and wget (安装Axel、curl和wget)
+          sudo apt-get update
+          sudo apt-get install -y axel curl wget
            
-           max_retries=5
-           for i in $(seq 1 $max_retries); do
-             if curl -fL -o SGSI-build-tool.tar "$tool_url"; then
-               echo "下载成功"
-               break
-             else
-               echo "下载失败，重试中 ($i/$max_retries)..."
-               sleep 10
-             fi
-           done
-           if [ ! -f "SGSI-build-tool.tar" ]; then
-             echo "::error::构建工具下载失败"
-             exit 1
-           fi
+      - name: Download Build Tools (下载构建工具)
+        run: |
+          tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
+          echo "Downloading build tools: $tool_url (正在下载构建工具)"
           
-       - name: Initialization environment
-         run: |
-           sudo tar -xf SGSI-build-tool.tar
-           sudo rm -rf SGSI-build-tool/10/setup.sh
-           sudo mv bin/setup.sh SGSI-build-tool/10/
-           cd SGSI-build-tool/10
-           sudo bash setup.sh
-           
-       - name: Download Rom
-         run: sudo wget -c ${{ steps.var.outputs.rom_url }} -O SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
-       
-       - name: Build Super SGSI
-         if: steps.var.outputs.make_super == 'true'
-         run: |
-           sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
-       
-       - name: Make MIUI SGSI
-         if: steps.var.outputs.make_miui == 'true'
-         run: |
-           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-           mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-       - name: Make Flyme SGSI
-         if: steps.var.outputs.make_flyme == 'true'
-         run: |
-           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-           mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-       - name: Make ColorOS SGSI
-         if: steps.var.outputs.make_coloros == 'true'
-         run: |
-           sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
-           sudo rm -rf SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
-           mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-       - name: Make H2OS SGSI
-         if: steps.var.outputs.make_h2os == 'true'
-         run: |
-           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-           mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-       - name: Make SmartisanOS SGSI
-         if: steps.var.outputs.make_smartisanos == 'true'
-         run: |
-           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-           mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-       - name: Make ZUI SGSI
-         if: steps.var.outputs.make_zui == 'true'
-         run: |
-           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-           mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          max_retries=5
+          for i in $(seq 1 $max_retries); do
+            # 优先使用Axel下载
+            if command -v axel &> /dev/null; then
+              echo "Using Axel (使用Axel下载)"
+              if axel -n 8 -a -o SGSI-build-tool.tar "$tool_url"; then
+                echo "Download successful (下载成功)"
+                break
+              else
+                echo "Axel failed, trying curl (Axel失败，尝试curl)"
+              fi
+            fi
             
-       - name: Generate SGSI
-         run: |
-           rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
-           mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
-           mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
-           cd SGSI-build-tool/10
-           sudo bash make.sh
+            # 其次使用curl下载
+            if command -v curl &> /dev/null; then
+              echo "Using curl (使用curl下载)"
+              if curl -# -fL -o SGSI-build-tool.tar "$tool_url"; then
+                echo "Download successful (下载成功)"
+                break
+              else
+                echo "curl failed, trying wget (curl失败，尝试wget)"
+              fi
+            fi
+            
+            # 最后使用wget下载
+            if command -v wget &> /dev/null; then
+              echo "Using wget (使用wget下载)"
+              if wget -q --show-progress -O SGSI-build-tool.tar "$tool_url"; then
+                echo "Download successful (下载成功)"
+                break
+              else
+                echo "wget failed (wget失败)"
+              fi
+            fi
+            
+            # 所有下载器都失败
+            if [ $i -lt $max_retries ]; then
+              echo "All download methods failed, retrying ($i/$max_retries)... (所有下载方式失败，重试中)"
+              sleep 10
+            else
+              echo "::error::Failed to download build tools after $max_retries attempts (构建工具下载失败)"
+              exit 1
+            fi
+          done
+          
+      - name: Initialize Environment (初始化环境)
+        run: |
+          # Extract and setup build tools (解压并设置构建工具)
+          sudo tar -xf SGSI-build-tool.tar
+          sudo rm -rf SGSI-build-tool/10/setup.sh
+          sudo mv bin/setup.sh SGSI-build-tool/10/
+          cd SGSI-build-tool/10
+          sudo bash setup.sh
            
-       - name: Zip Patch  
-         run: |
-           zip -r Patch1.zip Patch/Patch1/*
-           zip -r Patch2.zip Patch/Patch2/*
-           zip -r Patch3.zip Patch/Patch3/*
-           sudo mv Patch1.zip Patch2.zip Patch3.zip SGSI-build-tool/10/SGSI/
+      - name: Download ROM File (下载ROM文件)
+        run: |
+          # 设置下载路径
+          rom_path="SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
+          rom_url="${{ steps.var.outputs.rom_url }}"
+          
+          echo "Starting download of ${{ steps.var.outputs.rom_name }} (开始下载ROM文件)"
+          max_retries=5
+          
+          for i in $(seq 1 $max_retries); do
+            # 优先使用Axel下载
+            if command -v axel &> /dev/null; then
+              echo "Using Axel (使用Axel下载)"
+              if axel -n 10 -a -o "$rom_path" "$rom_url"; then
+                echo "Download successful (下载成功)"
+                break
+              else
+                echo "Axel failed, trying curl (Axel失败，尝试curl)"
+              fi
+            fi
+            
+            # 其次使用curl下载
+            if command -v curl &> /dev/null; then
+              echo "Using curl (使用curl下载)"
+              if curl -# -L -o "$rom_path" "$rom_url"; then
+                echo "Download successful (下载成功)"
+                break
+              else
+                echo "curl failed, trying wget (curl失败，尝试wget)"
+              fi
+            fi
+            
+            # 最后使用wget下载
+            if command -v wget &> /dev/null; then
+              echo "Using wget (使用wget下载)"
+              if wget -q --show-progress -O "$rom_path" "$rom_url"; then
+                echo "Download successful (下载成功)"
+                break
+              else
+                echo "wget failed (wget失败)"
+              fi
+            fi
+            
+            # 所有下载器都失败
+            if [ $i -lt $max_retries ]; then
+              echo "All download methods failed, retrying ($i/$max_retries)... (所有下载方式失败，重试中)"
+              sleep 10
+            else
+              echo "::error::Failed to download ROM after $max_retries attempts (ROM下载失败)"
+              exit 1
+            fi
+          done
+          
+          # 下载完成后显示文件信息
+          echo -e "\nDownload completed (下载完成)"
+          echo "File size: $(du -h "$rom_path" | cut -f1) (文件大小)"
+       
+      - name: Configure for Super SGSI (配置Super SGSI)
+        if: steps.var.outputs.make_super == 'true'
+        run: |
+          # Modify script for super SGSI (修改脚本以支持super SGSI)
+          sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
+       
+      - name: Configure for MIUI SGSI (配置MIUI SGSI)
+        if: steps.var.outputs.make_miui == 'true'
+        run: |
+          # Setup MIUI fix script (设置MIUI修复脚本)
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+           
+      - name: Configure for Flyme SGSI (配置Flyme SGSI)
+        if: steps.var.outputs.make_flyme == 'true'
+        run: |
+          # Setup Flyme fix script (设置Flyme修复脚本)
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
+           
+      - name: Process ColorOS ROM (处理ColorOS ROM)
+        if: steps.var.outputs.make_coloros == 'true'
+        run: |
+          # Decrypt ColorOS OZIP package (解密ColorOS OZIP包)
+          sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
+          sudo rm -rf SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh
+          # Setup ColorOS fix script (设置ColorOS修复脚本)
+          mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+           
+      - name: Configure for H2OS SGSI (配置H2OS SGSI)
+        if: steps.var.outputs.make_h2os == 'true'
+        run: |
+          # Setup H2OS fix script (设置H2OS修复脚本)
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+           
+      - name: Configure for SmartisanOS SGSI (配置SmartisanOS SGSI)
+        if: steps.var.outputs.make_smartisanos == 'true'
+        run: |
+          # Setup SmartisanOS fix script (设置SmartisanOS修复脚本)
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+           
+      - name: Configure for ZUI SGSI (配置ZUI SGSI)
+        if: steps.var.outputs.make_zui == 'true'
+        run: |
+          # Setup ZUI fix script (设置ZUI修复脚本)
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+          mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            
+      - name: Build SGSI Images (构建SGSI镜像)
+        run: |
+          # Prepare scripts and binaries (准备脚本和二进制文件)
+          rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
+          mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
+          mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
+          # Run build script (运行构建脚本)
+          cd SGSI-build-tool/10
+          sudo bash make.sh
+           
+      - name: Package Patches (打包补丁文件)
+        run: |
+          # Create patch archives (创建补丁归档文件)
+          zip -r Patch1.zip Patch/Patch1/*
+          zip -r Patch2.zip Patch/Patch2/*
+          zip -r Patch3.zip Patch/Patch3/*
+          sudo mv Patch1.zip Patch2.zip Patch3.zip SGSI-build-tool/10/SGSI/
 
-       - name: zip SGSI
-         run: |
-           mkdir -p upload
-           zip -r ${{ steps.var.outputs.pack_sgsi }} SGSI-build-tool/10/SGSI/*
-           if [[ $(du -sb ${{ steps.var.outputs.pack_sgsi }} | awk '{print $1}') -gt 2097152000 ]];then
-                 echo -e "split packaging..."
-                 tar -cpzf - ${{ steps.var.outputs.pack_sgsi }} | split -d -b 1024m - upload/${{ steps.var.outputs.pack_sgsi }}
-             else
-                 mv ${{ steps.var.outputs.pack_sgsi }} upload/
-             fi
-             ls "upload"
+      - name: Package SGSI Output (打包SGSI输出)
+        run: |
+          # Prepare upload directory (准备上传目录)
+          mkdir -p upload
+          # Create SGSI archive (创建SGSI归档文件)
+          zip -r ${{ steps.var.outputs.pack_sgsi }} SGSI-build-tool/10/SGSI/*
+          # Check file size and split if too large (检查文件大小，过大则分割)
+          file_size=$(du -sb ${{ steps.var.outputs.pack_sgsi }} | awk '{print $1}')
+          max_size=2097152000  # 2GB in bytes
+          
+          if [ $file_size -gt $max_size ]; then
+            echo "File too large ($file_size bytes), splitting for packaging... (文件过大，进行分割打包)"
+            split -b 1024m -d ${{ steps.var.outputs.pack_sgsi }} upload/${{ steps.var.outputs.pack_sgsi }}_
+            rm ${{ steps.var.outputs.pack_sgsi }}
+          else
+            echo "Moving file to upload directory (移动文件到上传目录)"
+            mv ${{ steps.var.outputs.pack_sgsi }} upload/
+          fi
+          
+          # List upload directory (列出上传目录内容)
+          echo "Upload directory contents: (上传目录内容)"
+          ls -lh "upload"
              
-       - name: Upload SGSI to action-gh-release...
-         uses: ncipollo/release-action@v1.8.6
-         with:
-           artifacts: upload/*
-           name: xiaoxinSGSI-ab-Android10-unpack
-           tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}
-           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Build Artifacts (上传构建产物)
+        uses: ncipollo/release-action@v1.8.6
+        with:
+          artifacts: upload/*
+          name: xiaoxinSGSI-ab-Android10-unpack
+          tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}
+          token: ${{ secrets.GITHUB_TOKEN }}
