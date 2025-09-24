@@ -42,39 +42,56 @@ jobs:
       - name: "📦 Install Download Tools (安装下载工具)"
         run: |
           sudo apt-get update
-          sudo apt-get install -y axel curl wget pv aria2 git e2fsprogs
+          # 安装基础工具和必要依赖
+          sudo apt-get install -y axel curl wget pv aria2 git make gcc libfuse-dev libssl-dev autoconf automake pkg-config e2fsprogs libcom-err2 libcom-err-dev
           
           # 设置axel配置
           echo "max-connections = 32" | sudo tee -a /etc/axelrc
           
-          # 下载预编译的 fuse-ext2
-          echo "🔧 下载预编译的 fuse-ext2..."
-          wget https://github.com/alperakcan/fuse-ext2/releases/download/v0.0.7/fuse-ext2-0.0.7-x86_64.deb
-          sudo dpkg -i fuse-ext2-0.0.7-x86_64.deb || sudo apt-get install -f -y
-          sudo ldconfig
+          # 安装 fuse-ext2 - 使用多种方法确保成功
+          echo "🔧 安装 fuse-ext2..."
           
-          # 测试是否安装成功
-          if command -v fuse-ext2 &> /dev/null; then
-            echo "✅ fuse-ext2 安装成功"
+          # 方法1: 尝试从 Ubuntu 仓库安装（如果可用）
+          if apt-cache show fuse-ext2 > /dev/null 2>&1; then
+            echo "📦 从 Ubuntu 仓库安装 fuse-ext2"
+            sudo apt-get install -y fuse-ext2
           else
-            echo "⚠️ fuse-ext2 安装失败，尝试从源码编译..."
+            echo "⚠️ Ubuntu 仓库中没有 fuse-ext2，尝试其他方法"
+          fi
+          
+          # 检查是否安装成功
+          if command -v fuse-ext2 &> /dev/null; then
+            echo "✅ fuse-ext2 已通过包管理器安装"
+          else
+            # 方法2: 从源码编译安装
+            echo "🔨 从源码编译安装 fuse-ext2..."
             
-            # 备用方案：从源码编译
-            sudo apt-get install -y libfuse-dev libssl-dev autoconf automake pkg-config libcom-err-dev
+            # 安装编译依赖
+            sudo apt-get install -y libext2fs-dev
+            
+            # 克隆源码
             git clone https://github.com/alperakcan/fuse-ext2.git
             cd fuse-ext2
+            
+            # 配置和编译
             ./autogen.sh || (aclocal && autoreconf -i)
             ./configure --prefix=/usr
             make
             sudo make install
             sudo ldconfig
             
-            # 再次验证
+            # 检查编译是否成功
             if command -v fuse-ext2 &> /dev/null; then
               echo "✅ fuse-ext2 源码编译安装成功"
             else
-              echo "❌ fuse-ext2 安装失败，将使用 debugfs 作为替代"
+              echo "⚠️ fuse-ext2 安装失败，将使用 debugfs 作为替代"
             fi
+          fi
+          
+          # 确保 debugfs 可用
+          if ! command -v debugfs &> /dev/null; then
+            echo "📦 安装 debugfs (e2fsprogs)"
+            sudo apt-get install -y e2fsprogs
           fi
            
       - name: "⬇️ Download Build Tools (下载构建工具)"
