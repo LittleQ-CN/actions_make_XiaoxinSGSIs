@@ -15,10 +15,24 @@ jobs:
        
       - name: "🧹 Clean Up Environment (清理环境)"
         run: |
-          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php
-          sudo -E apt-get -y purge azure-cli zulu* hhvm llvm* firefox dotnet* powershell
-          sudo -E apt-get update
-          sudo -E apt-get -y autoremove --purge
+          echo "🗑️ 启动全面清理..."
+          # Remove Docker images / 移除Docker镜像
+          docker rmi $(docker images -q) >/dev/null 2>&1 || true
+          
+          # Delete large directories / 删除大型目录
+          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
+          
+          # Purge unnecessary packages / 移除不必要的软件包
+          sudo apt-get purge -y \
+            azure-cli ghc* zulu* hhvm llvm* \
+            firefox google-chrome* dotnet* powershell \
+            openjdk* mysql* php* >/dev/null 2>&1 || true
+          
+          # Perform system cleanup / 执行系统级清理
+          sudo apt-get update -qq
+          sudo apt-get autoremove -y --purge -qq
+          sudo apt-get clean -qq
+          echo "✅ 清理完成！磁盘空间:"
           df -h
        
       - name: "⚙️ Get Configuration Variables (获取配置变量)"
@@ -40,6 +54,7 @@ jobs:
       - name: "📦 Install Essential Tools (安装基础工具)"
         run: |
           sudo apt-get update
+          # Install essential tools including aria2 / 安装必要工具包括aria2
           sudo apt-get install -y aria2 curl jq brotli android-sdk-libsparse-utils
           echo "✅ 基础工具安装完成"
           
@@ -74,6 +89,7 @@ jobs:
           sudo tar -xf SGSI-build-tool.tar
           
           echo "🔄 准备运行环境设置脚本..."
+          # Ensure setup.sh exists and make it executable / 确保setup.sh存在并赋予执行权限
           if [[ -f "SGSI-build-tool/10/setup.sh" ]]; then
             echo "🔧 设置setup.sh执行权限..."
             sudo chmod +x SGSI-build-tool/10/setup.sh
@@ -94,6 +110,7 @@ jobs:
           cd SGSI-build-tool/10
           
           echo "🛠️ 修复二进制兼容性..."
+          # Create symlinks to system tools / 创建系统工具符号链接
           ln -sf $(which brotli) bin/brotli
           ln -sf $(which simg2img) bin/simg2img
           ln -sf $(which img2simg) bin/img2simg
@@ -113,6 +130,7 @@ jobs:
           max_retries=5
           retry_delay=10
           
+          # Priority: aria2 with 15 threads / 优先使用aria2（15线程）
           for i in $(seq 1 $max_retries); do
             if command -v aria2c &> /dev/null; then
               echo "⚡ 使用aria2下载 [$filename] (15线程)"
@@ -124,6 +142,7 @@ jobs:
               fi
             fi
             
+            # Fallback: curl with resume support / 备选方案：curl带断点续传
             if command -v curl &> /dev/null; then
               echo "⚡ 使用curl下载 [$filename] (带断点续传)"
               if curl -# -fL -C - -o "$rom_path" "$rom_url"; then
@@ -150,6 +169,7 @@ jobs:
         run: |
           echo "开始配置ROM特定设置..."
           
+          # Determine ROM type / 确定ROM类型
           rom_type="Generic"
           if [ "${{ steps.var.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.var.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
@@ -160,14 +180,17 @@ jobs:
           
           echo "ℹ️ 检测到的ROM类型: $rom_type"
           
+          # Super SGSI configuration / Super SGSI配置
           if [ "${{ steps.var.outputs.make_super }}" = "true" ]; then
             echo "配置Super SGSI..."
             sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
             echo "Super SGSI配置完成"
           fi
           
+          # Remove old fixbug script / 删除旧的fixbug脚本
           sudo rm -f SGSI-build-tool/10/fixbug/fixbug.sh
           
+          # ColorOS special handling (decryption) / ColorOS特殊处理（解密）
           if [ "$rom_type" = "ColorOS" ]; then
             echo "解密ColorOS OZIP包..."
             sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
@@ -175,6 +198,7 @@ jobs:
             echo "ColorOS ROM解密完成"
           fi
           
+          # Apply ROM-specific fix script / 应用特定ROM的修复脚本
           if [[ -f "fix/${rom_type}.sh" ]]; then
             echo "应用$rom_type配置脚本..."
             cp "fix/${rom_type}.sh" SGSI-build-tool/10/fixbug/fixbug.sh
@@ -190,6 +214,7 @@ jobs:
           cd SGSI-build-tool/10
           
           echo "修复SGSI.sh脚本错误..."
+          # Fix conditional syntax errors / 修复条件语法错误
           sed -i -e 's/\[ \]/\[ -n /g' \
                  -e 's/\] =/ \]/g' \
                  -e 's/==/=/g' SGSI.sh
@@ -201,16 +226,19 @@ jobs:
         run: |
           echo "准备构建脚本..."
           
+          # Move build scripts / 移动构建脚本
           if [[ -d "make" ]]; then
             echo "移动构建脚本..."
             cp make/*.sh SGSI-build-tool/10/
           fi
           
+          # Move binary tools / 移动二进制工具
           if [[ -d "bin" ]]; then
             echo "移动二进制工具..."
             cp bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
           fi
           
+          # Reapply architecture fixes / 重新应用架构修复
           cd SGSI-build-tool/10
           ln -sf $(which brotli) bin/brotli
           ln -sf $(which simg2img) bin/simg2img
@@ -241,7 +269,7 @@ jobs:
           echo "准备上传文件..."
           mkdir -p upload
           file_size=$(stat -c%s "${{ steps.var.outputs.pack_sgsi }}")
-          max_size=2097152000
+          max_size=2097152000  # 2GB
           
           if [[ $file_size -gt $max_size ]]; then
             echo "⚠️ 文件过大 ($(numfmt --to=iec $file_size))，进行分卷打包..."
