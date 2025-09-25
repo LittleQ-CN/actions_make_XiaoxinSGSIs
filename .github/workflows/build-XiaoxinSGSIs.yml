@@ -84,7 +84,7 @@ jobs:
           echo "🔄 准备运行环境设置脚本..."
           if [[ -f "SGSI-build-tool/10/setup.sh" ]]; then
             echo "🔧 设置setup.sh执行权限..."
-            sudo chmod +x SGSI-build-tool/10/s极客修复：up.sh
+            sudo chmod +x SGSI-build-tool/10/setup.sh
             
             echo "🔄 运行环境设置脚本..."
             cd SGSI-build-tool/10
