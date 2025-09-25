@@ -1,4 +1,3 @@
-
 name: build_XiaoxinSGSIs_old
 
 on:
@@ -270,28 +269,33 @@ jobs:
             exit 1
           fi
           
-          # 4. 准备上传目录
-          mkdir -p upload
+          # 4. 准备上传目录（关键修复：在工作区根目录创建）
+          mkdir -p "${GITHUB_WORKSPACE}/upload"
           file_size=$(stat -c%s "$output_file")
           max_size=2097152000  # 2GB
           
           # 5. 检查文件大小并分卷处理
           if [[ $file_size -gt $max_size ]]; then
             echo "⚠️ 文件过大 ($(numfmt --to=iec $file_size))，进行分卷打包..."
-            split -b 1024m -d "$output_file" "upload/${output_file}_part"
+            split -b 1024m -d "$output_file" "${output_file}_part"
+            # 移动分卷文件到上传目录
+            mv "${output_file}_part"* "${GITHUB_WORKSPACE}/upload/"
             # 删除原始大文件
             rm "$output_file"
             echo "分卷文件列表:"
-            ls -lh upload
+            ls -lh "${GITHUB_WORKSPACE}/upload"
           else
-            echo "移动文件到upload目录"
-            mv "$output_file" upload/
+            echo "移动文件到上传目录"
+            mv "$output_file" "${GITHUB_WORKSPACE}/upload/"
           fi
           
           # 6. 确保上传目录有内容
           echo "=== 上传目录内容 ==="
-          ls -lh upload || true
+          ls -lh "${GITHUB_WORKSPACE}/upload" || true
           echo "===================="
+          
+          # 7. 保存上传目录路径（用于后续步骤）
+          echo "UPLOAD_DIR=${GITHUB_WORKSPACE}/upload" >> $GITHUB_ENV
              
       - name: "🏷️ Generate Release Tag (生成发布标签)"
         id: release_tag
@@ -305,7 +309,7 @@ jobs:
       - name: "🚀 Upload Build Artifacts (上传构建产物)"
         uses: ncipollo/release-action@v1.11.0
         with:
-          artifacts: upload/*
+          artifacts: "${{ env.UPLOAD_DIR }}/*"
           name: xiaoxinSGSI-ab-Android10-unpack
           tag: ${{ steps.release_tag.outputs.release_tag }}
           token: ${{ secrets.GITHUB_TOKEN }}
