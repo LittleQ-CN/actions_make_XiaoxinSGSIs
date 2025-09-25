@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs_old
 
 on:
@@ -17,8 +18,9 @@ jobs:
         run: |
           echo "🗑️ 启动全面清理..."
           docker rmi $(docker images -q) >/dev/null 2>&1 || true
-          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
+          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt /etc/php /etc/apt/sources.list.d
           sudo apt-get purge -y \
+            azure-get purge -y \
             azure-cli ghc* zulu* hhvm llvm* \
             firefox google-chrome* dotnet* powershell \
             openjdk* mysql* php* >/dev/null 2>&1 || true
@@ -31,11 +33,14 @@ jobs:
       - name: "⚙️ Get Configuration Variables (获取配置变量)"
         run: |
           {
+           )"
+        run: |
+          {
             echo "rom_url=$(jq -r '.rom_url' sgsi.json)"
             echo "rom_name=$(jq -r '.rom_name' sgsi.json)"
             echo "pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)"
             echo "make_miui=$(jq -r '.make_miui' sgsi.json)"
-            echo "make_flyme=$(jq -r '.make_flyme' sgsi.json)"
+            echo "make_flyme=$(jq -r '.make_flymeq -r '.make_flyme' sgsi.json)"
             echo "make_coloros=$(jq -r '.make_coloros' sgsi.json)"
             echo "make_h2os=$(jq -r '.make_h2os' sgsi.json)"
             echo "make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)"
@@ -101,6 +106,7 @@ jobs:
           cd SGSI-build-tool/10
           echo "🛠️ 修复二进制兼容性..."
           ln -sf $(which brotli) bin/brotli
+          ln) bin/brotli
           ln -sf $(which simg2img) bin/simg2img
           ln -sf $(which img2simg) bin/img2simg
           ln -sf $(which mke2fs) bin/mke2fs
@@ -127,7 +133,8 @@ jobs:
           
           for i in $(seq 1 $max_retries); do
             if command -v aria2c &> /dev/null; then
-              echo "⚡ 使用aria2下载 [$filename] (15线程)"
+              echo "⚡  then
+              echo "⚡ 使用aria2下载 [$filename] (使用aria2下载 [$filename] (15线程)"
               if aria2c -x 15 -s 15 -k 1M -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")" "$rom_url"; then
                 echo "✅ 下载成功"
                 break
@@ -187,7 +194,7 @@ jobs:
             echo "ColorOS ROM解密完成"
           fi
           
-          if [[ -f "fix/${rom_type}.sh" ]]; then
+          if [[ -f "fix/${rom_type}.sh" "fix/${rom_type}.sh" ]]; then
             echo "应用$rom_type配置脚本..."
             cp "fix/${rom_type}.sh" SGSI-build-tool/10/fixbug/fixbug.sh
             echo "$rom_type配置完成"
@@ -203,6 +210,7 @@ jobs:
           
           echo "修复SGSI.sh脚本错误..."
           sed -i -e 's/\[ \]/\[ -n /g' \
+                 -en /g' \
                  -e 's/\] =/ \]/g' \
                  -e 's/==/=/g' SGSI.sh
                  
@@ -262,6 +270,8 @@ jobs:
           # 2. 创建输出文件名
           output_file="${{ steps.var.outputs.pack_sgsi }}"
           
+         ack_sgsi }}"
+          
           # 3. 打包文件
           echo "打包SGSI到: $output_file"
           if ! zip -r "$output_file" SGSI/*; then
@@ -275,6 +285,7 @@ jobs:
           max_size=2097152000  # 2GB
           
           # 5. 检查文件大小并分卷处理
+          if大小并分卷处理
           if [[ $file_size -gt $max_size ]]; then
             echo "⚠️ 文件过大 ($(numfmt --to=iec $file_size))，进行分卷打包..."
             split -b 1024m -d "$output_file" "upload/${output_file}_part"
@@ -296,8 +307,9 @@ jobs:
         id: release_tag
         run: |
           current_date=$(date +"%Y%m%d")
-          rom_type="$(if [ \"${{ steps.var.outputs.make_miui}}\" = \"true\" ]; then echo \"MIUI\"; elif [ \"${{ steps.var.outputs.make_flyme}}\" = \"true\" ]; then echo \"Flyme\"; elif [ \"${{ steps.var.outputs.make_coloros}}\" = \"true\" ]; then echo \"ColorOS\"; elif [ \"${{ steps.var.outputs.make_h2os}}\" = \"true\" ]; then echo \"H2OS\"; elif [ \"${{ steps.var.outputs.make_smartisanos}}\" = \"true\" ]; then echo \"SmartisanOS\"; elif [ \"${{ steps.var.outputs.make_zui}}\" = \"true\" ]; then echo \"ZUI\"; else echo \"Generic\"; fi)"
-          release_tag="${current_date}_$rom_type"
+          +"%Y%m%d")
+          rom_type="$(if [ \"${{ steps.var.outputs.make_miui}}\" = \"true\" ]; then echo \"MIUI\"; elif [ \"${{ steps.var.outputs.make_flyme}}\" = \"true\" ]; then echo \" = \"true\" ]; then echo \"Flyme\"; elif [ \"${{ steps.var.outputs.make_coloros}}\" = \"true\" ]; then echo \"ColorOS\"; elif [ \"${{ steps.var.outputs.make_h2os}}\" = \"true\" ]; then echo \"H2OS\"; elif [ \"${{ steps.var.outputs.make_smartisanos}}\" = \"true\" ]; then echo \"SmartisanOS\"; elif [ \"${{ steps.var.outputs.make_zui}}\" = \"true\" ]; then echo \"ZUI\"; else echo \"Generic\"; fi)"
+          release_tag="${current_date}_$rom_type="${current_date}_$rom_type"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           echo "Generated release tag: $release_tag"
              
@@ -314,9 +326,7 @@ jobs:
       - name: "❌ Check Artifact Upload (检查上传结果)"
         if: steps.upload-step.outcome != 'success'
         run: |
- != 'success'
-        run: |
-          echo "::error::构建产物          echo "::error::构建产物上传失败！"
+          echo "::error::构建产物上传失败！"
           echo "请检查'Package Output'步骤的输出"
           echo "当前工作目录内容:"
           pwd
