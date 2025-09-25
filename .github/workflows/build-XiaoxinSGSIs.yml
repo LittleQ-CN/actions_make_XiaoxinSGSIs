@@ -1,4 +1,3 @@
-
 name: build_XiaoxinSGSIs_old
 
 on:
@@ -34,7 +33,7 @@ jobs:
       - name: "📦 Install Tools (安装工具)"
         run: |
           sudo apt-get update
-          sudo apt-get install -y axel curl wget pv aria2 jq
+          sudo apt-get install -y axel curl wget pv aria2 jq brotli android-sdk-libsparse-utils
           echo "max-connections=32" | sudo tee -a /etc/axelrc
           echo "✅ Tools installed (工具安装完成)"
            
@@ -141,6 +140,24 @@ jobs:
           fi
           
           echo "✅ 环境准备就绪 (Environment ready)"
+          
+      - name: "🔧 Fix Architecture Issues (修复架构问题)"
+        run: |
+          cd SGSI-build-tool/10
+          
+          # 备份ARM架构的二进制文件
+          mkdir -p backup_arm_bin
+          mv bin/* backup_arm_bin/ || true
+          
+          # 创建符号链接使用系统工具
+          ln -sf $(which brotli) bin/brotli
+          ln -sf $(which simg2img) bin/simg2img
+          ln -sf $(which img2simg) bin/img2simg
+          ln -sf $(which mke2fs) bin/mke2fs
+          ln -sf $(which e2fsdroid) bin/e2fsdroid
+          
+          echo "✅ 已修复二进制工具兼容性问题 (Fixed binary compatibility issues)"
+          cd ../..
 
       - name: "💾 Download ROM (下载ROM)"
         run: |
@@ -235,24 +252,28 @@ jobs:
             
           echo "rom_type=$rom_type" >> $GITHUB_OUTPUT
           
+      - name: "🔧 Fix Script Errors (修复脚本错误)"
+        run: |
+          cd SGSI-build-tool/10
+          
+          # 修复条件判断语法错误
+          sed -i -e 's/\[ \]/\[ -n /g' \
+                 -e 's/\] =/ \]/g' \
+                 -e 's/==/=/g' SGSI.sh
+                 
+          echo "✅ 已修复脚本语法错误 (Fixed script syntax errors)"
+          cd ../..
+          
       - name: "🛠️ Build SGSI (构建SGSI)"
         run: |
           cd SGSI-build-tool/10
           
-          if [[ -d "../make" ]]; then
-            sudo mv ../make/*.sh .
-          else
-            echo "::warning::⚠️ make目录不存在 (make directory not found)"
-          fi
-          
-          if [[ -d "../bin" ]]; then
-            sudo mv ../bin/mke2fs ../bin/e2fsdroid .
-          else
-            echo "::warning::⚠️ bin目录不存在 (bin directory not found)"
-          fi
+          # 确保必要的目录存在
+          [[ -d "../make" ]] && sudo mv ../make/*.sh . || echo "::warning::⚠️ make目录不存在"
+          [[ -d "../bin" ]] && sudo mv ../bin/mke2fs ../bin/e2fsdroid . || echo "::warning::⚠️ bin目录不存在"
           
           echo "🏗️ 开始构建SGSI (Starting SGSI build)..."
-          sudo bash make.sh
+          sudo bash make.sh || { echo "::error::❌ 构建失败 (Build failed)"; exit 1; }
           echo "🎉 构建完成 (Build completed)"
              
       - name: "📦 Package Output (打包输出)"
