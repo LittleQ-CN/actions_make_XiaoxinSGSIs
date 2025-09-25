@@ -81,12 +81,9 @@ jobs:
           echo "📂 解压构建工具..."
           sudo tar -xf SGSI-build-tool.tar
           
-          echo ".tar
-          
           echo "🔄 准备运行环境设置脚本..."
           if [[ -f "SGSI-build-tool/10/setup.sh" ]]; then
             echo "🔧 设置setup.sh执行权限..."
-            sudo chmod +x权限..."
             sudo chmod +x SGSI-build-tool/10/setup.sh
             
             echo "🔄 运行环境设置脚本..."
@@ -105,7 +102,6 @@ jobs:
           cd SGSI-build-tool/10
           echo "🛠️ 修复二进制兼容性..."
           ln -sf $(which brotli) bin/brotli
-          ln -sf $(whichli
           ln -sf $(which simg2img) bin/simg2img
           ln -sf $(which img2simg) bin/img2simg
           ln -sf $(which mke2fs) bin/mke2fs
@@ -171,7 +167,7 @@ jobs:
           if [ "${{ steps.var.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.var.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
           if [ "${{ steps.var.outputs.make_coloros }}" = "true" ]; then rom_type="ColorOS"; fi
-          if [ "${{ steps.var.outputs.make_h2 steps.var.outputs.make_h2os }}" = "true" ]; then rom_type="H2OS"; fi
+          if [ "${{ steps.var.outputs.make_h2os }}" = "true" ]; then rom_type="H2OS"; fi
           if [ "${{ steps.var.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.var.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
@@ -179,7 +175,7 @@ jobs:
           
           if [ "${{ steps.var.outputs.make_super }}" = "true" ]; then
             echo "配置Super SGSI..."
-            sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGS_SGSI.sh/g' SGSI-build-tool/10/make.sh
+            sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
             echo "Super SGSI配置完成"
           fi
           
@@ -248,7 +244,6 @@ jobs:
             echo "================"
             exit 1
           fi
-          echo "🎉          fi
           echo "🎉 SGSI镜像构建完成"
            
       - name: "📦 Package Output (打包输出)"
@@ -259,7 +254,6 @@ jobs:
           
           # 1. 验证SGSI目录是否存在
           if [[ ! -d "SGSI" ]]; then
-            echo "::error::
             echo "::error::❌ SGSI目录不存在！"
             echo "当前目录内容:"
             ls -la
@@ -283,9 +277,10 @@ jobs:
           
           # 5. 检查文件大小并分卷处理
           if [[ $file_size -gt $max_size ]]; then
-            echo "⚠ ]]; then
             echo "⚠️ 文件过大 ($(numfmt --to=iec $file_size))，进行分卷打包..."
             split -b 1024m -d "$output_file" "upload/${output_file}_part"
+            # 删除原始大文件
+            rm "$output_file"
             echo "分卷文件列表:"
             ls -lh upload
           else
@@ -305,7 +300,6 @@ jobs:
           rom_type="$(if [ \"${{ steps.var.outputs.make_miui}}\" = \"true\" ]; then echo \"MIUI\"; elif [ \"${{ steps.var.outputs.make_flyme}}\" = \"true\" ]; then echo \"Flyme\"; elif [ \"${{ steps.var.outputs.make_coloros}}\" = \"true\" ]; then echo \"ColorOS\"; elif [ \"${{ steps.var.outputs.make_h2os}}\" = \"true\" ]; then echo \"H2OS\"; elif [ \"${{ steps.var.outputs.make_smartisanos}}\" = \"true\" ]; then echo \"SmartisanOS\"; elif [ \"${{ steps.var.outputs.make_zui}}\" = \"true\" ]; then echo \"ZUI\"; else echo \"Generic\"; fi)"
           release_tag="${current_date}_$rom_type"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
-          echo "Generated release tagPUT
           echo "Generated release tag: $release_tag"
              
       - name: "🚀 Upload Build Artifacts (上传构建产物)"
@@ -321,7 +315,9 @@ jobs:
       - name: "❌ Check Artifact Upload (检查上传结果)"
         if: steps.upload-step.outcome != 'success'
         run: |
-          echo "::error::构建产物上传失败！"
+ != 'success'
+        run: |
+          echo "::error::构建产物          echo "::error::构建产物上传失败！"
           echo "请检查'Package Output'步骤的输出"
           echo "当前工作目录内容:"
           pwd
