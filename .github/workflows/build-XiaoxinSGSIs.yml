@@ -10,31 +10,31 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
+      # 1. 检出代码
       - name: "🚀 Checkout Code (检出代码)"
         uses: actions/checkout@v4
        
+      # 2. 环境清理
       - name: "🧹 Clean Up Environment (清理环境)"
         run: |
           echo "🗑️ 启动全面清理..."
-          # Remove Docker images / 移除Docker镜像
+          # 清理Docker镜像
           docker rmi $(docker images -q) >/dev/null 2>&1 || true
-          
-          # Delete large directories / 删除大型目录
+          # 删除大型目录
           sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
-          
-          # Purge unnecessary packages / 移除不必要的软件包
+          # 移除不必要的软件包
           sudo apt-get purge -y \
             azure-cli ghc* zulu* hhvm llvm* \
             firefox google-chrome* dotnet* powershell \
             openjdk* mysql* php* >/dev/null 2>&1 || true
-          
-          # Perform system cleanup / 执行系统级清理
+          # 系统级清理
           sudo apt-get update -qq
           sudo apt-get autoremove -y --purge -qq
           sudo apt-get clean -qq
           echo "✅ 清理完成！磁盘空间:"
           df -h
        
+      # 3. 配置变量获取
       - name: "⚙️ Get Configuration Variables (获取配置变量)"
         run: |
           {
@@ -51,13 +51,14 @@ jobs:
           } >> $GITHUB_OUTPUT
         id: var
            
+      # 4. 基础工具安装
       - name: "📦 Install Essential Tools (安装基础工具)"
         run: |
           sudo apt-get update
-          # Install essential tools including aria2 / 安装必要工具包括aria2
           sudo apt-get install -y aria2 curl jq brotli android-sdk-libsparse-utils
           echo "✅ 基础工具安装完成"
           
+      # 5. 构建工具下载
       - name: "⬇️ Download Build Tools (下载构建工具)"
         run: |
           tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
@@ -83,13 +84,13 @@ jobs:
             fi
           done
           
+      # 6. 环境初始化
       - name: "🏗️ Initialize Environment (初始化环境)"
         run: |
           echo "📂 解压构建工具..."
           sudo tar -xf SGSI-build-tool.tar
           
           echo "🔄 准备运行环境设置脚本..."
-          # Ensure setup.sh exists and make it executable / 确保setup.sh存在并赋予执行权限
           if [[ -f "SGSI-build-tool/10/setup.sh" ]]; then
             echo "🔧 设置setup.sh执行权限..."
             sudo chmod +x SGSI-build-tool/10/setup.sh
@@ -105,21 +106,28 @@ jobs:
           
           echo "✅ 环境初始化完成"
           
+      # 7. 架构问题修复
       - name: "🔧 Fix Architecture Issues (修复架构问题)"
         run: |
           cd SGSI-build-tool/10
-          
           echo "🛠️ 修复二进制兼容性..."
-          # Create symlinks to system tools / 创建系统工具符号链接
           ln -sf $(which brotli) bin/brotli
           ln -sf $(which simg2img) bin/simg2img
           ln -sf $(which img2simg) bin/img2simg
           ln -sf $(which mke2fs) bin/mke2fs
           ln -sf $(which e2fsdroid) bin/e2fsdroid
-          
           echo "✅ 已修复二进制工具兼容性问题"
           cd ../..
+          
+      # 8. 目录权限修复
+      - name: "🔒 Fix Directory Permissions (修复目录权限)"
+        run: |
+          echo "修复SGSI-build-tool目录权限..."
+          sudo chown -R $USER:$USER SGSI-build-tool
+          sudo chmod -R 755 SGSI-build-tool
+          echo "✅ 目录权限已修复"
 
+      # 9. ROM文件下载
       - name: "💾 Download ROM File (下载ROM文件)"
         run: |
           rom_path="SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
@@ -130,7 +138,6 @@ jobs:
           max_retries=5
           retry_delay=10
           
-          # Priority: aria2 with 15 threads / 优先使用aria2（15线程）
           for i in $(seq 1 $max_retries); do
             if command -v aria2c &> /dev/null; then
               echo "⚡ 使用aria2下载 [$filename] (15线程)"
@@ -142,7 +149,6 @@ jobs:
               fi
             fi
             
-            # Fallback: curl with resume support / 备选方案：curl带断点续传
             if command -v curl &> /dev/null; then
               echo "⚡ 使用curl下载 [$filename] (带断点续传)"
               if curl -# -fL -C - -o "$rom_path" "$rom_url"; then
@@ -165,11 +171,11 @@ jobs:
           echo -e "\n🎉 下载完成"
           echo "📦 文件大小: $(du -h "$rom_path" | cut -f1)"
 
+      # 10. ROM特定配置
       - name: "⚙️ Configure ROM Specific Settings (配置ROM特定设置)"
         run: |
           echo "开始配置ROM特定设置..."
           
-          # Determine ROM type / 确定ROM类型
           rom_type="Generic"
           if [ "${{ steps.var.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.var.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
@@ -180,17 +186,14 @@ jobs:
           
           echo "ℹ️ 检测到的ROM类型: $rom_type"
           
-          # Super SGSI configuration / Super SGSI配置
           if [ "${{ steps.var.outputs.make_super }}" = "true" ]; then
             echo "配置Super SGSI..."
             sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
             echo "Super SGSI配置完成"
           fi
           
-          # Remove old fixbug script / 删除旧的fixbug脚本
           sudo rm -f SGSI-build-tool/10/fixbug/fixbug.sh
           
-          # ColorOS special handling (decryption) / ColorOS特殊处理（解密）
           if [ "$rom_type" = "ColorOS" ]; then
             echo "解密ColorOS OZIP包..."
             sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
@@ -198,7 +201,6 @@ jobs:
             echo "ColorOS ROM解密完成"
           fi
           
-          # Apply ROM-specific fix script / 应用特定ROM的修复脚本
           if [[ -f "fix/${rom_type}.sh" ]]; then
             echo "应用$rom_type配置脚本..."
             cp "fix/${rom_type}.sh" SGSI-build-tool/10/fixbug/fixbug.sh
@@ -209,12 +211,12 @@ jobs:
             
           echo "ROM特定设置配置完成"
           
+      # 11. 脚本错误修复
       - name: "🔧 Fix Script Errors (修复脚本错误)"
         run: |
           cd SGSI-build-tool/10
           
           echo "修复SGSI.sh脚本错误..."
-          # Fix conditional syntax errors / 修复条件语法错误
           sed -i -e 's/\[ \]/\[ -n /g' \
                  -e 's/\] =/ \]/g' \
                  -e 's/==/=/g' SGSI.sh
@@ -222,30 +224,30 @@ jobs:
           echo "✅ 已修复脚本语法错误"
           cd ../..
           
+      # 12. 构建文件准备
       - name: "🛠️ Prepare Build Files (准备构建文件)"
         run: |
           echo "准备构建脚本..."
           
-          # Move build scripts / 移动构建脚本
           if [[ -d "make" ]]; then
             echo "移动构建脚本..."
             cp make/*.sh SGSI-build-tool/10/
           fi
           
-          # Move binary tools / 移动二进制工具
           if [[ -d "bin" ]]; then
             echo "移动二进制工具..."
-            cp bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
+            sudo cp bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
           fi
           
-          # Reapply architecture fixes / 重新应用架构修复
           cd SGSI-build-tool/10
+          echo "更新符号链接..."
           ln -sf $(which brotli) bin/brotli
           ln -sf $(which simg2img) bin/simg2img
           cd ../..
           
           echo "✅ 构建文件准备完成"
           
+      # 13. SGSI构建
       - name: "🏭 Build SGSI Images (构建SGSI镜像)"
         run: |
           cd SGSI-build-tool/10
@@ -254,6 +256,7 @@ jobs:
           sudo bash make.sh || { echo "::error::❌ 构建失败"; exit 1; }
           echo "🎉 SGSI镜像构建完成"
            
+      # 14. 输出打包
       - name: "📦 Package Output (打包输出)"
         run: |
           cd SGSI-build-tool/10
@@ -282,6 +285,7 @@ jobs:
           echo "📁 上传目录内容:"
           ls -lh upload
              
+      # 15. 发布标签生成
       - name: "🏷️ Generate Release Tag (生成发布标签)"
         id: release_tag
         run: |
@@ -291,6 +295,7 @@ jobs:
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           echo "Generated release tag: $release_tag"
              
+      # 16. 构建产物上传
       - name: "🚀 Upload Build Artifacts (上传构建产物)"
         uses: ncipollo/release-action@v1.11.0
         with:
