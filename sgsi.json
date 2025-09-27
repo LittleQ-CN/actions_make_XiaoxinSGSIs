@@ -1,7 +1,7 @@
 {
-  "rom_url": "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/V11.0.2.0.QDTCNXM/miui_MI8Lite_V11.0.2.0.QDTCNXM_4a11ed64fc_10.0.zip",
-  "rom_name": "miui_MI8Lite_V11.0.2.0.QDTCNXM_4a11ed64fc_10.0.zip",
-  "pack_sgsi": "MIUI11.02-M8Lite_A10_CN_TEST-AB.zip",
+  "rom_url": "https://phoenixnap.dl.sourceforge.net/project/xiaomi-eu-multilang-miui-roms/xiaomi.eu/MIUI-STABLE-RELEASES/MIUIv12/xiaomi.eu_multi_MI8LITE_V12.5.1.0.QDTCNXM_v12-10.zip?viasf=1",
+  "rom_name": "xiaomi.eu_multi_MI8LITE_V12.5.1.0.QDTCNXM_v12-10.zip",
+  "pack_sgsi": "MIUI12.5.1_eu-M8Lite_A10_TEST-AB.zip",
   "make_miui": true,
   "make_flyme": false,
   "make_coloros": false,
