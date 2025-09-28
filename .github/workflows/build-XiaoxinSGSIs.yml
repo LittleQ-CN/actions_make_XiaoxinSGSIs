@@ -1,4 +1,4 @@
-name: build_XiaoxinSGSIs_old
+name: build_XiaoxinSGSIs_AI_Edit
 
 on:
   watch:
@@ -52,7 +52,7 @@ jobs:
           
       - name: "⬇️ Download Build Tools (下载构建工具)"
         run: |
-          tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
+          tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v2.1/SGSI-build-tool.tar"
           filename="SGSI-build-tool.tar"
           
           echo "🔧 开始下载构建工具..."
