@@ -1,17 +1,25 @@
-name: build_XiaoxinSGSIs_Old-1.9
+name: build_XiaoxinSGSIs_Old-1.9_Ai-Edit
 
 on:
-  watch:
-    types: [started]
-    
+  workflow_dispatch:  # 手动触发
+
 jobs:
   build:
     runs-on: ubuntu-22.04
-    if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
       - name: "🚀 Checkout Code (检出代码)"
         uses: actions/checkout@v4
+        
+      - name: "📋 检查sgsi.sh配置状态"
+        run: |
+          if [[ -f "SGSI-build-tool/10/sgsi.sh" ]]; then
+            echo "✅ 检测到已配置sgsi.sh文件"
+            echo "文件内容预览："
+            head -10 SGSI-build-tool/10/sgsi.sh || true
+          else
+            echo "ℹ️ 未检测到自定义sgsi.sh文件，将使用默认配置"
+          fi
        
       - name: "🧹 Clean Up Environment (清理环境)"
         run: |
