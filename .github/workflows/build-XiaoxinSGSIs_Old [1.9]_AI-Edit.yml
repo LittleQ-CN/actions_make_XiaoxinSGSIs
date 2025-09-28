@@ -309,16 +309,37 @@ jobs:
         id: release_tag
         run: |
           current_date=$(date +"%Y%m%d")
-          rom_type="$(if [ \"${{ steps.var.outputs.make_miui}}\" = \"true\" ]; then echo \"MIUI\"; elif [ \"${{ steps.var.outputs.make_flyme}}\" = \"true\" ]; then echo \"Flyme\"; elif [ \"${{ steps.var.outputs.make_coloros}}\" = \"true\" ]; then echo \"ColorOS\"; elif [ \"${{ steps.var.outputs.make_h2os}}\" = \"true\" ]; then echo \"H2OS\"; elif [ \"${{ steps.var.outputs.make_smartisanos}}\" = \"true\" ]; then echo \"SmartisanOS\"; elif [ \"${{ steps.var.outputs.make_zui}}\" = \"true\" ]; then echo \"ZUI\"; else echo \"Generic\"; fi)"
-          release_tag="${current_date}_$rom_type"
+          
+          # 获取12小时制的时间
+          hour=$(date +"%I")
+          minute=$(date +"%M")
+          am_pm=$(date +"%p")
+          
+          # 移除小时的前导零
+          hour_no_zero=$(echo $hour | sed 's/^0//')
+          
+          # 检测ROM类型
+          rom_type="Generic"
+          if [ "${{ steps.var.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
+          if [ "${{ steps.var.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
+          if [ "${{ steps.var.outputs.make_coloros }}" = "true" ]; then rom_type="ColorOS"; fi
+          if [ "${{ steps.var.outputs.make_h2os }}" = "true" ]; then rom_type="H2OS"; fi
+          if [ "${{ steps.var.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
+          if [ "${{ steps.var.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
+          
+          # 添加唯一标识符避免冲突
+          unique_id=$(echo $GITHUB_RUN_ID | tail -c 4)
+          
+          # 生成唯一标签 (格式: Old-1.9-20251023-PM2:30-ROMTYPE-UNIQUEID)
+          release_tag="Old-1.9-${current_date}-${am_pm}${hour_no_zero}:${minute}-${rom_type}-${unique_id}"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
-          echo "Generated release tag: $release_tag"
+          echo "Generated unique release tag: $release_tag"
              
       - name: "🚀 Upload Build Artifacts (上传构建产物)"
         uses: ncipollo/release-action@v1.11.0
         with:
           artifacts: "${{ env.UPLOAD_DIR }}/*"
-          name: xiaoxinSGSI-ab-Android10-unpack
+          name: "XiaoxinSGSI Old-1.9 Build (${{ steps.release_tag.outputs.release_tag }})"
           tag: ${{ steps.release_tag.outputs.release_tag }}
           token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
