@@ -74,7 +74,7 @@ jobs:
             p7zip-full \
             zip \
             unzip \
-            e2fsprogs  # 安装e2fsprogs包，包含e2fsdroid
+            e2fsprogs
           
           echo "✅ Tools installation complete (工具安装完成)"
           
@@ -123,23 +123,19 @@ jobs:
           # Create necessary directories (创建必要目录)
           sudo mkdir -p bin
           
-          # Create symbolic links (创建符号链接)
-          for tool in brotli simg2img img2simg mke2fs e2fsdroid; do
-            if command -v $tool >/dev/null 2>&1; then
-              sudo ln -sf $(which $tool) bin/$tool
-              echo "✅ Linked $tool"
+          # Create symbolic links for essential tools only (仅为必要工具创建符号链接)
+          for tool in brotli simg2img img2simg mke2fs; do
+            tool_location=$(which $tool 2>/dev/null)
+            if [[ -n "$tool_location" ]]; then
+              sudo ln -sf "$tool_location" bin/$tool
+              echo "✅ Linked $tool from $tool_location"
             else
-              # 仅对e2fsdroid发出警告，其他工具缺失则报错
-              if [ "$tool" = "e2fsdroid" ]; then
-                echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
-              else
-                echo "::error::❌ Required tool not found: $tool (未找到必需工具: $tool)"
-                exit 1
-              fi
+              echo "::error::❌ Required tool not found: $tool (未找到必需工具: $tool)"
+              exit 1
             fi
           done
           
-          echo "✅ Binary tool compatibility issues fixed (已修复二进制工具兼容性问题)"
+          echo "✅ Essential binary tools linked (必需二进制工具链接完成)"
           cd ../..
           
       - name: "🔒 Fix Directory Permissions (修复目录权限)"
@@ -170,7 +166,7 @@ jobs:
             # Prefer aria2 if available (优先使用aria2)
             if command -v aria2c &> /dev/null; then
               echo "⚡ Using aria2 download (multi-threaded) (使用aria2下载 - 多线程)"
-              if sudo aria2c -x 8 -s 8 -k 1M -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")" "$rom_url"; then
+              if sudo aria2c -x 8 -s 8 -k 1M "$rom_url" -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")"; then
                 echo "✅ aria2 download successful (aria2下载成功)"
                 break
               fi
@@ -280,7 +276,7 @@ jobs:
           if [[ -d "bin" ]]; then
             echo "Moving binary tools (移动二进制工具)..."
             sudo mkdir -p SGSI-build-tool/10/bin
-            sudo cp -v bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
+            sudo cp -v bin/mke2fs SGSI-build-tool/10/bin/
           fi
           
           # Update symbolic links (更新符号链接)
@@ -342,6 +338,11 @@ jobs:
           max_size=2000000000  # 2GB
           
           # Check file size and split if needed (检查文件大小并在需要时分卷)
+          if [[ -z "$file_size" ]] || [[ "$file_size" -eq 0 ]]; then
+            echo "::error::❌ SGSI production failed or is empty (SGSI产出失败或为空)"
+            exit 1
+          fi
+          
           if [[ $file_size -gt $max_size ]]; then
             echo "⚠️ File too large ($(numfmt --to=iec-i $file_size)), splitting into parts (文件过大，进行分卷打包)..."
             sudo split -b 1000m -d -a 1 "$output_file" "${output_file}_part"
@@ -368,6 +369,7 @@ jobs:
         id: release_tag
         run: |
           current_date=$(date +"%Y%m%d")
+          timestamp=$(date +"%H%M%S")
           
           # Determine ROM type based on config (根据配置确定ROM类型)
           rom_type="Generic"
@@ -378,32 +380,43 @@ jobs:
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
-          # Add unique identifier (添加唯一标识符)
-          unique_id=$(echo $GITHUB_RUN_ID | tail -c 4)
-          
-          # Generate release tag (生成发布标签)
-          release_tag="${current_date}_${rom_type}_${unique_id}"
+          # Generate unique tag to avoid conflicts (生成唯一标签以避免冲突)
+          release_tag="${current_date}_${timestamp}_${rom_type}"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           echo "Generated release tag: $release_tag (生成的发布标签: $release_tag)"
              
-      - name: "🚀 Upload Build Artifacts (上传构建产物)"
-        uses: ncipollo/release-action@v1.11.0
+      - name: "🚀 Create Release with Unique Tag (使用唯一标签创建发布)"
+        uses: softprops/action-gh-release@v1
         with:
-          artifacts: "${{ env.UPLOAD_DIR }}/*"
-          name: "xiaoxinSGSI-ab-Android10-unpack"
-          tag: "${{ steps.release_tag.outputs.release_tag }}"
-          token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-        id: upload-step
-        
+          name: "Auto Build SGSI - ${{ steps.release_tag.outputs.release_tag }}"
+          tag_name: "${{ steps.release_tag.outputs.release_tag }}"
+          files: "${{ env.UPLOAD_DIR }}/*"
+          body: |
+            This is an automated SGSI build.
+            这是一个自动构建的SGSI镜像。
+            
+            ---
+            Built at: ${{ steps.release_tag.outputs.release_tag }}
+            ROM Type: $rom_type
+            
+            ---
+            👉 How to use:
+            1. Flash to your device
+            2. Reboot
+            3. Enjoy!
+            
+            🔧 Note: This is an experimental build.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+             
       - name: "✅ Check Upload Status (检查上传状态)"
         run: |
-          if [ "${{ steps.upload-step.outcome }}" != "success" ]; then
-            echo "::warning::⚠️ Release upload may have issues, but continuing (发布上传可能有问题，但继续执行)"
+          if [[ -n "${{ github.event.release }}" ]] && [[ -n "${{ github.event.release.upload_url }}" ]]; then
+            echo "🎉 Release created successfully! (发布创建成功！)"
+          else
+            echo "::warning::⚠️ Release creation may have issues (发布创建可能有问题)"
             echo "Upload artifacts directory contents (上传产物目录内容):"
             ls -la "${{ env.UPLOAD_DIR }}" || true
-          else
-            echo "🎉 Release created successfully! (发布创建成功！)"
           fi
              
       - name: "✅ Completion Notification (完成通知)"
