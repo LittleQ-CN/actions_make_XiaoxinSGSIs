@@ -103,53 +103,6 @@ jobs:
           
           echo "✅ Environment initialization complete (环境初始化完成)"
           
-      - name: "🔧 Try to Find and Link e2fsdroid (尝试查找并链接e2fsdroid)"
-        run: |
-          echo "🔍 Searching for e2fsdroid on system (在系统中搜索e2fsdroid)..."
-          
-          # List all possible locations where e2fsdroid might be (列出e2fsdroid可能存在的所有位置)
-          possible_paths=(
-            "/usr/bin/e2fsdroid"
-            "/usr/local/bin/e2fsdroid"
-            "/bin/e2fsdroid"
-            "/sbin/e2fsdroid"
-            "/usr/sbin/e2fsdroid"
-            "/usr/lib/android-sdk/build-tools/*/e2fsdroid"
-            "/usr/lib/android-sdk/platform-tools/e2fsdroid"
-            "/opt/android-sdk/build-tools/*/e2fsdroid"
-          )
-          
-          # Search for e2fsdroid in the system (在系统中搜索e2fsdroid)
-          e2fsdroid_path=""
-          for path_pattern in "${possible_paths[@]}"; do
-            expanded_paths=$(ls $path_pattern 2>/dev/null || true)
-            for path in $expanded_paths; do
-              if [[ -f "$path" && -x "$path" ]]; then
-                e2fsdroid_path="$path"
-                echo "✅ Found e2fsdroid at: $e2fsdroid_path"
-                break 2
-              fi
-            done
-          done
-          
-          # If not found, try using find command (如果没有找到，尝试使用find命令)
-          if [[ -z "$e2fsdroid_path" ]]; then
-            e2fsdroid_path=$(find /usr -name "e2fsdroid" 2>/dev/null | head -1)
-            if [[ -n "$e2fsdroid_path" && -f "$e2fsdroid_path" && -x "$e2fsdroid_path" ]]; then
-              echo "✅ Found e2fsdroid using find: $e2fsdroid_path"
-            fi
-          fi
-          
-          # Create bin directory and link e2fsdroid if found (如果找到e2fsdroid，创建bin目录并链接)
-          if [[ -n "$e2fsdroid_path" ]]; then
-            mkdir -p SGSI-build-tool/10/bin
-            ln -sf "$e2fsdroid_path" SGSI-build-tool/10/bin/e2fsdroid
-            echo "✅ Linked e2fsdroid to: SGSI-build-tool/10/bin/e2fsdroid"
-          else
-            echo "⚠️ e2fsdroid not found on system, skipping (系统中未找到e2fsdroid，跳过)"
-            echo "This may cause issues with some ROM types, but the build will continue (这可能会导致某些ROM类型出现问题，但构建将继续)"
-          fi
-          
       - name: "🔧 Fix Toolchain Issues (修复工具链问题)"
         run: |
           cd SGSI-build-tool/10
@@ -325,6 +278,7 @@ jobs:
           echo "✅ Build files preparation completed (构建文件准备完成)"
           
       - name: "🏭 Build SGSI Image (构建SGSI镜像)"
+        id: build_sgsi
         run: |
           cd SGSI-build-tool/10
           
@@ -341,6 +295,21 @@ jobs:
           ' || exit $?
           
           echo "🎉 SGSI image build completed (SGSI镜像构建完成)"
+          
+          # Extract device model information from build.prop (从build.prop提取设备机型信息)
+          if [[ -f "./out/system/system/build.prop" ]]; then
+            model=$(grep 'ro.product.model' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || true)
+            if [[ -n "$model" ]]; then
+              echo "📱 Extracted device model: $model (提取的设备机型: $model)"
+              echo "model=$model" >> $GITHUB_OUTPUT
+            else
+              echo "⚠️ Could not extract model information from build.prop (无法从build.prop提取机型信息)"
+              echo "model=Unknown" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "⚠️ build.prop file not found (未找到build.prop文件)"
+            echo "model=Unknown" >> $GITHUB_OUTPUT
+          fi
            
       - name: "📦 Package Output Files (打包输出文件)"
         run: |
@@ -430,19 +399,25 @@ jobs:
       - name: "🚀 Create Release with Unique Tag (使用唯一标签创建发布)"
         uses: softprops/action-gh-release@v1
         with:
-          name: "Auto Build SGSI - ${{ steps.release_tag.outputs.release_tag }}"
+          name: "Auto Build SGSI With XiaoxinTools AB-Android10 ${{ steps.release_tag.outputs.release_tag }}"
           tag_name: "${{ steps.release_tag.outputs.release_tag }}"
           files: "${{ env.UPLOAD_DIR }}/*"
           body: |
-            ## SGSI Build Information (构建信息)
+            ## SGSI 构建信息 (Build Information)
             
-            **Built at (构建时间):** ${{ steps.release_tag.outputs.release_tag }}
+            **构建时间 (Built at):** ${{ steps.release_tag.outputs.release_tag }}
             
-            **ROM Type (ROM 类型):** ${{ steps.release_tag.outputs.rom_type }} [自动识别]
+            **ROM 类型 (ROM Type):** ${{ steps.release_tag.outputs.rom_type }} [自动识别]
+            
+            **原包机型 (Source Device):** ${{ steps.build_sgsi.outputs.model }}
+            
+            **构建工具 (Build Tools):** XiaoxinTools_1.9 (Only_Android10/AB)
             
             ---
             
-            🔧 **Note (注意):** This is an experimental build. (这是一个实验性构建)
+            🔧 **注意 (Note):** 这是一个实验性构建 (This is an experimental build)
+            
+            📝 **构建日志:** 可在GitHub Actions中查看完整构建日志
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
              
