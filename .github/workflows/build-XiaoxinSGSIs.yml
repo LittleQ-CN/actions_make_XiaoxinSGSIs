@@ -13,41 +13,41 @@ jobs:
       - name: "Checkout Code (检出代码)"
         uses: actions/checkout@v4
         
-      - name: "📋 检查配置文件状态"
+      - name: "📋 Check Config Status (检查配置文件状态)"
         run: |
-          # 检查sgsi.json配置文件
+          # Check sgsi.json config file (检查sgsi.json配置文件)
           if [[ ! -f "sgsi.json" ]]; then
-            echo "::error::❌ 缺少sgsi.json配置文件"
+            echo "::error::❌ Missing sgsi.json config file (缺少sgsi.json配置文件)"
             exit 1
           fi
           
-          # 检查sgsi.sh文件
+          # Check sgsi.sh file (检查sgsi.sh文件)
           if [[ -f "SGSI-build-tool/10/sgsi.sh" ]]; then
-            echo "✅ 检测到已配置sgsi.sh文件"
-            echo "文件内容预览："
+            echo "✅ Detected configured sgsi.sh file (检测到已配置sgsi.sh文件)"
+            echo "File content preview (文件内容预览):"
             head -10 SGSI-build-tool/10/sgsi.sh || true
           else
-            echo "ℹ️ 未检测到自定义sgsi.sh文件，将使用默认配置"
+            echo "ℹ️ No custom sgsi.sh detected, using default config (未检测到自定义sgsi.sh文件，将使用默认配置)"
           fi
        
       - name: "🧹 Clean Up Environment (清理环境)"
         run: |
-          echo "🗑️ 启动全面清理..."
-          # 使用更安全的清理命令
+          echo "🗑️ Starting full cleanup (启动全面清理)..."
+          # Use safer cleanup commands (使用更安全的清理命令)
           sudo docker system prune -af >/dev/null 2>&1 || true
           sudo apt-get autoremove -y --purge
           sudo apt-get clean
           sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d || true
-          echo "✅ 清理完成！磁盘空间:"
+          echo "✅ Cleanup complete! Disk space (清理完成！磁盘空间):"
           df -h
        
-      - name: "⚙️ 解析配置变量"
+      - name: "⚙️ Parse Config Variables (解析配置变量)"
         id: config
         run: |
-          # 使用更健壮的JSON解析方式
+          # Use more robust JSON parsing (使用更健壮的JSON解析方式)
           rom_url=$(jq -r '.rom_url // empty' sgsi.json)
           if [[ -z "$rom_url" ]]; then
-            echo "::error::❌ sgsi.json中缺少rom_url字段"
+            echo "::error::❌ Missing rom_url field in sgsi.json (sgsi.json中缺少rom_url字段)"
             exit 1
           fi
           
@@ -64,7 +64,7 @@ jobs:
             echo "make_super=$(jq -r '.make_super // "false"' sgsi.json)"
           } >> $GITHUB_OUTPUT
            
-      - name: "📦 安装必要工具"
+      - name: "📦 Install Required Tools (安装必要工具)"
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -79,140 +79,140 @@ jobs:
             zip \
             unzip
           
-          echo "✅ 工具安装完成"
+          echo "✅ Tools installation complete (工具安装完成)"
           
-      - name: "⬇️ 下载构建工具"
+      - name: "⬇️ Download Build Tools (下载构建工具)"
         run: |
           tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
           filename="SGSI-build-tool.tar"
           
-          echo "🔧 开始下载构建工具..."
+          echo "🔧 Starting build tools download (开始下载构建工具)..."
           max_retries=5
           retry_delay=10
           
           for i in $(seq 1 $max_retries); do
             if curl -fL -o "$filename" "$tool_url"; then
-              echo "✅ 下载成功"
+              echo "✅ Download successful (下载成功)"
               break
             else
-              echo "❌ 下载失败 (尝试 $i/$max_retries)"
+              echo "❌ Download failed (尝试 $i/$max_retries) (下载失败)"
               if [ $i -eq $max_retries ]; then
-                echo "::error::❌ 构建工具下载失败"
+                echo "::error::❌ Build tools download failed (构建工具下载失败)"
                 exit 1
               fi
-              echo "🔄 ${retry_delay}秒后重试..."
+              echo "🔄 Retrying in ${retry_delay} seconds (${retry_delay}秒后重试)..."
               sleep $retry_delay
             fi
           done
           
-      - name: "🏗️ 初始化构建环境"
+      - name: "🏗️ Initialize Build Environment (初始化构建环境)"
         run: |
-          echo "📂 解压构建工具..."
+          echo "📂 Extracting build tools (解压构建工具)..."
           if ! sudo tar -xf SGSI-build-tool.tar; then
-            echo "::error::❌ 解压构建工具失败"
+            echo "::error::❌ Failed to extract build tools (解压构建工具失败)"
             exit 1
           fi
           
-          # 设置执行权限
+          # Set execute permissions (设置执行权限)
           sudo find SGSI-build-tool -name "*.sh" -exec chmod +x {} \;
           
-          echo "🔄 准备运行环境设置脚本..."
+          echo "🔄 Preparing to run environment setup script (准备运行环境设置脚本)..."
           if [[ -f "SGSI-build-tool/10/setup.sh" ]]; then
-            echo "🔧 运行环境设置脚本..."
+            echo "🔧 Running environment setup script (运行环境设置脚本)..."
             cd SGSI-build-tool/10
-            # 捕获setup.sh的输出和错误
+            # Capture setup.sh output and errors (捕获setup.sh输出和错误)
             if ! sudo bash setup.sh 2>&1 | tee setup.log; then
-              echo "::warning::⚠️ 安装脚本返回非零状态，检查日志后继续"
+              echo "::warning::⚠️ Setup script returned non-zero status, continuing after checking log (安装脚本返回非零状态，检查日志后继续)"
               cat setup.log
             fi
             cd ../..
           else
-            echo "::warning::⚠️ 未找到setup.sh脚本，跳过环境设置"
+            echo "::warning::⚠️ setup.sh script not found, skipping environment setup (未找到setup.sh脚本，跳过环境设置)"
           fi
           
-          echo "✅ 环境初始化完成"
+          echo "✅ Environment initialization complete (环境初始化完成)"
           
-      - name: "🔧 修复工具链问题"
+      - name: "🔧 Fix Toolchain Issues (修复工具链问题)"
         run: |
           cd SGSI-build-tool/10
-          echo "🛠️ 修复二进制兼容性..."
+          echo "🛠️ Fixing binary compatibility (修复二进制兼容性)..."
           
-          # 创建必要的目录
+          # Create necessary directories (创建必要目录)
           sudo mkdir -p bin
           
-          # 创建符号链接
+          # Create symbolic links (创建符号链接)
           for tool in brotli simg2img img2simg mke2fs e2fsdroid; do
             if command -v $tool >/dev/null 2>&1; then
               sudo ln -sf $(which $tool) bin/$tool
-              echo "✅ 链接 $tool"
+              echo "✅ Linked $tool"
             else
-              echo "::warning::⚠️ 未找到工具: $tool"
+              echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
             fi
           done
           
-          echo "✅ 已修复二进制工具兼容性问题"
+          echo "✅ Binary tool compatibility issues fixed (已修复二进制工具兼容性问题)"
           cd ../..
           
-      - name: "🔒 修复目录权限"
+      - name: "🔒 Fix Directory Permissions (修复目录权限)"
         run: |
-          echo "修复SGSI-build-tool目录权限..."
+          echo "Fixing SGSI-build-tool directory permissions (修复SGSI-build-tool目录权限)..."
           sudo chown -R $(id -u):$(id -g) SGSI-build-tool
           sudo chmod -R 755 SGSI-build-tool
-          echo "✅ 目录权限已修复"
+          echo "✅ Directory permissions fixed (目录权限已修复)"
           
-      - name: "💾 下载ROM文件"
+      - name: "💾 Download ROM File (下载ROM文件)"
         run: |
           rom_path="SGSI-build-tool/10/tmp/${{ steps.config.outputs.rom_name }}"
           rom_url="${{ steps.config.outputs.rom_url }}"
           filename="${{ steps.config.outputs.rom_name }}"
           
-          # 创建目标目录
+          # Create target directory (创建目标目录)
           sudo mkdir -p "$(dirname "$rom_path")"
           
-          echo "🚀 开始下载ROM: $filename"
+          echo "🚀 Starting ROM download: $filename"
           echo "📥 URL: $rom_url"
           
           max_retries=5
           retry_delay=30
           
           for i in $(seq 1 $max_retries); do
-            echo "尝试 $i/$max_retries..."
+            echo "Attempt $i/$max_retries (尝试 $i/$max_retries)..."
             
-            # 优先使用aria2（如果可用）
+            # Prefer aria2 if available (优先使用aria2)
             if command -v aria2c &> /dev/null; then
-              echo "⚡ 使用aria2下载 (多线程)"
+              echo "⚡ Using aria2 download (multi-threaded) (使用aria2下载 - 多线程)"
               if sudo aria2c -x 8 -s 8 -k 1M -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")" "$rom_url"; then
-                echo "✅ aria2下载成功"
+                echo "✅ aria2 download successful (aria2下载成功)"
                 break
               fi
             fi
             
-            # 回退到curl
+            # Fallback to curl (备用curl)
             if command -v curl &> /dev/null; then
-              echo "⚡ 使用curl下载"
+              echo "⚡ Using curl download (使用curl下载)"
               if sudo curl -fL -C - -o "$rom_path" "$rom_url"; then
-                echo "✅ curl下载成功"
+                echo "✅ curl download successful (curl下载成功)"
                 break
               fi
             fi
             
             if [ $i -eq $max_retries ]; then
-              echo "::error::❌ ROM下载失败"
+              echo "::error::❌ ROM download failed (ROM下载失败)"
               exit 1
             fi
             
-            echo "🔄 ${retry_delay}秒后重试..."
+            echo "🔄 Retrying in ${retry_delay} seconds (${retry_delay}秒后重试)..."
             sleep $retry_delay
           done
           
-          echo -e "\n🎉 下载完成"
-          echo "📦 文件信息: $(sudo ls -lh "$rom_path")"
+          echo -e "\n🎉 Download completed (下载完成)"
+          echo "📦 File info (文件信息): $(sudo ls -lh "$rom_path")"
 
-      - name: "⚙️ 配置ROM特定设置"
+      - name: "⚙️ Configure ROM Specific Settings (配置ROM特定设置)"
         run: |
-          echo "开始配置ROM特定设置..."
+          echo "Starting ROM-specific configuration (开始配置ROM特定设置)..."
           
-          # 确定ROM类型
+          # Determine ROM type (确定ROM类型)
           rom_type="Generic"
           if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
@@ -221,80 +221,80 @@ jobs:
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
-          echo "ℹ️ 检测到的ROM类型: $rom_type"
+          echo "ℹ️ Detected ROM type: $rom_type (检测到的ROM类型: $rom_type)"
           
-          # 配置Super SGSI
+          # Configure Super SGSI (配置Super SGSI)
           if [ "${{ steps.config.outputs.make_super }}" = "true" ]; then
-            echo "配置Super SGSI..."
+            echo "Configuring Super SGSI (配置Super SGSI)..."
             if [[ -f "SGSI-build-tool/10/make.sh" ]]; then
               sudo sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
-              echo "Super SGSI配置完成"
+              echo "Super SGSI configuration completed (Super SGSI配置完成)"
             else
-              echo "::warning::⚠️ 未找到make.sh脚本，跳过Super SGSI配置"
+              echo "::warning::⚠️ make.sh script not found, skipping Super SGSI configuration (未找到make.sh脚本，跳过Super SGSI配置)"
             fi
           fi
           
-          # 清理旧的fixbug脚本
+          # Clean up old fixbug script (清理旧的fixbug脚本)
           sudo rm -f SGSI-build-tool/10/fixbug/fixbug.sh
           
-          # ColorOS特殊处理
+          # ColorOS special handling (ColorOS特殊处理)
           if [ "$rom_type" = "ColorOS" ]; then
-            echo "解密ColorOS OZIP包..."
+            echo "Decrypting ColorOS OZIP package (解密ColorOS OZIP包)..."
             if [[ -f "SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py" ]]; then
               sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py "SGSI-build-tool/10/tmp/${{ steps.config.outputs.rom_name }}"
               sudo rm -f "SGSI-build-tool/10/tmp/${{ steps.config.outputs.rom_name }}"
-              echo "ColorOS ROM解密完成"
+              echo "ColorOS ROM decryption completed (ColorOS ROM解密完成)"
             else
-              echo "::error::❌ 未找到ozipdecrypt.py脚本"
+              echo "::error::❌ ozipdecrypt.py script not found (未找到ozipdecrypt.py脚本)"
               exit 1
             fi
           fi
           
-          # 应用特定ROM的修复脚本
+          # Apply ROM-specific fix scripts (应用ROM特定的修复脚本)
           if [[ -f "fix/${rom_type}.sh" ]]; then
-            echo "应用$rom_type配置脚本..."
+            echo "Applying $rom_type configuration script (应用$rom_type配置脚本)..."
             sudo cp "fix/${rom_type}.sh" SGSI-build-tool/10/fixbug/fixbug.sh
             sudo chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-            echo "$rom_type配置完成"
+            echo "$rom_type configuration completed ($rom_type配置完成)"
           else
-            echo "ℹ️ 找不到$rom_type配置脚本，使用通用配置"
+            echo "ℹ️ $rom_type configuration script not found, using generic configuration (找不到$rom_type配置脚本，使用通用配置)"
           fi
             
-          echo "ROM特定设置配置完成"
+          echo "ROM-specific configuration completed (ROM特定设置配置完成)"
           
-      - name: "🔧 修复脚本语法错误"
+      - name: "🔧 Fix Script Syntax Errors (修复脚本语法错误)"
         run: |
           cd SGSI-build-tool/10
           
-          echo "检查并修复SGSI.sh脚本错误..."
+          echo "Checking and fixing SGSI.sh script errors (检查并修复SGSI.sh脚本错误)..."
           if [[ -f "SGSI.sh" ]]; then
-            # 更精确的修复，避免过度替换
+            # More precise fixes to avoid over-replacement (更精确的修复以避免过度替换)
             sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/\[ -n "\1" ]/g' SGSI.sh
             sudo sed -i 's/==/=/g' SGSI.sh
-            echo "✅ 已修复脚本语法错误"
+            echo "✅ Script syntax errors fixed (已修复脚本语法错误)"
           else
-            echo "::warning::⚠️ 未找到SGSI.sh脚本"
+            echo "::warning::⚠️ SGSI.sh script not found (未找到SGSI.sh脚本)"
           fi
           cd ../..
           
-      - name: "🛠️ 准备构建文件"
+      - name: "📦 Prepare Build Files (准备构建文件)"
         run: |
-          echo "准备构建脚本和工具..."
+          echo "Preparing build scripts and tools (准备构建脚本和工具)..."
           
-          # 复制自定义构建脚本
+          # Copy custom build scripts (复制自定义构建脚本)
           if [[ -d "make" ]]; then
-            echo "移动构建脚本..."
+            echo "Moving build scripts (移动构建脚本)..."
             sudo cp -v make/*.sh SGSI-build-tool/10/
           fi
           
-          # 复制二进制工具
+          # Copy binary tools (复制二进制工具)
           if [[ -d "bin" ]]; then
-            echo "移动二进制工具..."
+            echo "Moving binary tools (移动二进制工具)..."
             sudo mkdir -p SGSI-build-tool/10/bin
             sudo cp -v bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
           fi
           
-          # 更新符号链接
+          # Update symbolic links (更新符号链接)
           cd SGSI-build-tool/10
           for tool in brotli simg2img; do
             if command -v $tool >/dev/null 2>&1; then
@@ -303,84 +303,84 @@ jobs:
           done
           cd ../..
           
-          echo "✅ 构建文件准备完成"
+          echo "✅ Build files preparation completed (构建文件准备完成)"
           
-      - name: "🏭 构建SGSI镜像"
+      - name: "🏭 Build SGSI Image (构建SGSI镜像)"
         run: |
           cd SGSI-build-tool/10
           
-          echo "🏗️ 开始构建SGSI..."
-          # 设置更长的超时时间
+          echo "🏗️ Starting SGSI build (开始构建SGSI)..."
+          # Set longer timeout (设置更长的超时时间)
           timeout 60m bash -c '
             if ! sudo bash make.sh 2>&1 | tee make.log; then
-              echo "::error::❌ 构建失败！"
-              echo "=== 构建日志最后100行 ==="
+              echo "::error::❌ Build failed! (构建失败！)"
+              echo "=== Last 100 lines of build log (构建日志最后100行) ==="
               tail -100 make.log
               echo "========================"
               exit 1
             fi
           ' || exit $?
           
-          echo "🎉 SGSI镜像构建完成"
+          echo "🎉 SGSI image build completed (SGSI镜像构建完成)"
            
-      - name: "📦 打包输出文件"
+      - name: "📦 Package Output Files (打包输出文件)"
         run: |
           cd SGSI-build-tool/10
           
-          echo "=== 打包步骤 ==="
+          echo "=== Packaging step (打包步骤) ==="
           
-          # 验证SGSI目录是否存在
+          # Verify SGSI directory exists (验证SGSI目录存在)
           if [[ ! -d "SGSI" ]]; then
-            echo "::error::❌ SGSI目录不存在！"
-            echo "当前目录内容:"
+            echo "::error::❌ SGSI directory does not exist! (SGSI目录不存在！)"
+            echo "Current directory contents (当前目录内容):"
             ls -la
             exit 1
           fi
           
-          # 创建输出文件名
+          # Create output filename (创建输出文件名)
           output_file="${{ steps.config.outputs.pack_sgsi }}"
           
-          # 打包文件
-          echo "打包SGSI到: $output_file"
+          # Package files (打包文件)
+          echo "Packaging SGSI to: $output_file"
           if ! sudo zip -r "$output_file" SGSI/*; then
-            echo "::error::❌ 打包失败！"
+            echo "::error::❌ Packaging failed! (打包失败！)"
             exit 1
           fi
           
-          # 准备上传目录
+          # Prepare upload directory (准备上传目录)
           sudo mkdir -p "${GITHUB_WORKSPACE}/upload"
           file_size=$(sudo stat -c%s "$output_file")
           max_size=2000000000  # 2GB
           
-          # 检查文件大小并分卷处理
+          # Check file size and split if needed (检查文件大小并在需要时分卷)
           if [[ $file_size -gt $max_size ]]; then
-            echo "⚠️ 文件过大 ($(numfmt --to=iec-i $file_size))，进行分卷打包..."
+            echo "⚠️ File too large ($(numfmt --to=iec-i $file_size)), splitting into parts (文件过大，进行分卷打包)..."
             sudo split -b 1000m -d -a 1 "$output_file" "${output_file}_part"
-            # 移动分卷文件到上传目录
+            # Move split files to upload directory (移动分卷文件到上传目录)
             sudo mv "${output_file}_part"* "${GITHUB_WORKSPACE}/upload/"
-            # 删除原始大文件
+            # Delete original large file (删除原始大文件)
             sudo rm "$output_file"
-            echo "分卷文件列表:"
+            echo "Split file list (分卷文件列表):"
             sudo ls -lh "${GITHUB_WORKSPACE}/upload"
           else
-            echo "移动文件到上传目录"
+            echo "Moving file to upload directory (移动文件到上传目录)"
             sudo mv "$output_file" "${GITHUB_WORKSPACE}/upload/"
           fi
           
-          # 确保上传目录有内容
-          echo "=== 上传目录内容 ==="
+          # Ensure upload directory has content (确保上传目录有内容)
+          echo "=== Upload directory contents (上传目录内容) ==="
           sudo ls -lh "${GITHUB_WORKSPACE}/upload" || true
           echo "===================="
           
-          # 保存上传目录路径
+          # Save upload directory path (保存上传目录路径)
           echo "UPLOAD_DIR=${GITHUB_WORKSPACE}/upload" >> $GITHUB_ENV
              
-      - name: "🏷️ 生成发布标签"
+      - name: "🏷️ Generate Release Tag (生成发布标签)"
         id: release_tag
         run: |
           current_date=$(date +"%Y%m%d")
           
-          # 检测ROM类型
+          # Detect ROM type (检测ROM类型)
           rom_type="Generic"
           if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
@@ -389,24 +389,24 @@ jobs:
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
-          # 添加唯一标识符避免冲突
+          # Add unique identifier to avoid conflicts (添加唯一标识符以避免冲突)
           unique_id=$(echo $GITHUB_RUN_ID | tail -c 4)
           
-          # 生成唯一标签
-          release_tag="Old-1.9-${current_date}-${rom_type}-${unique_id}"
+          # Generate unique tag (生成唯一标签)
+          release_tag="Lasted-1.9-${current_date}-${rom_type}-${unique_id}"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
-          echo "生成的发布标签: $release_tag"
+          echo "Generated release tag: $release_tag (生成的发布标签: $release_tag)"
              
-      - name: "🚀 上传构建产物"
+      - name: "🚀 Upload Build Artifacts (上传构建产物)"
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.release_tag.outputs.release_tag }}
           path: ${{ env.UPLOAD_DIR }}/*
           if-no-files-found: error
           
-      - name: "✅ 完成通知"
+      - name: "✅ Completion Notification (完成通知)"
         if: success()
         run: |
-          echo "🎉 构建完成!"
-          echo "发布标签: ${{ steps.release_tag.outputs.release_tag }}"
-          echo "产物位置: ${{ env.UPLOAD_DIR }}"
+          echo "🎉 Build completed! (构建完成!)"
+          echo "Release tag: ${{ steps.release_tag.outputs.release_tag }} (发布标签)"
+          echo "Artifact location: ${{ env.UPLOAD_DIR }} (产物位置)"
