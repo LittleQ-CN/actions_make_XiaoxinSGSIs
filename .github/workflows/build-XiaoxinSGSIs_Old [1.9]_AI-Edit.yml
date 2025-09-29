@@ -331,7 +331,7 @@ jobs:
         uses: ncipollo/release-action@v1.11.0
         with:
           artifacts: "${{ env.UPLOAD_DIR }}/*"
-          name: "XiaoxinSGSI Old-1.9 Build (${{ steps.release_tag.outputs.release_tag }})"
+          name: "XiaoxinSGSI Build (${{ steps.release_tag.outputs.release_tag }})"
           tag: ${{ steps.release_tag.outputs.release_tag }}
           token: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
