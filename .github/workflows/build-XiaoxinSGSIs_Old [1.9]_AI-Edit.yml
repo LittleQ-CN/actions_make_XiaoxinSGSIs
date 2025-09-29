@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: "🚀 Checkout Code (检出代码)"
+      - name: "Checkout Code (检出代码)"
         uses: actions/checkout@v4
         
       - name: "📋 检查sgsi.sh配置状态"
@@ -310,30 +310,6 @@ jobs:
         run: |
           current_date=$(date +"%Y%m%d")
           
-          # 获取24小时制的时间并转换为12小时制格式
-          hour_24=$(date +"%H")
-          minute=$(date +"%M")
-          
-          # 转换为12小时制并格式化为PM/AM+时间（无分隔符）
-          if [ "$hour_24" -eq "00" ]; then
-            hour_12="12"
-            am_pm="AM"
-          elif [ "$hour_24" -lt "12" ]; then
-            hour_12=$(printf "%02d" $((10#$hour_24)))
-            am_pm="AM"
-          elif [ "$hour_24" -eq "12" ]; then
-            hour_12="12"
-            am_pm="PM"
-          else
-            hour_12=$(printf "%02d" $((10#$hour_24 - 12)))
-            am_pm="PM"
-          fi
-          
-          # 移除前导零（如果小时是两位数）
-          if [[ $hour_12 == "0"* ]]; then
-            hour_12="${hour_12:1}"
-          fi
-          
           # 检测ROM类型
           rom_type="Generic"
           if [ "${{ steps.var.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
@@ -346,10 +322,8 @@ jobs:
           # 添加唯一标识符避免冲突
           unique_id=$(echo $GITHUB_RUN_ID | tail -c 4)
           
-          # 生成唯一标签 (格式: Old-1.9-20251023-PM0215-MIUI_5678)
-          # 时间格式为 PM/AM + 小时(无前导零) + 分钟
-          time_part="${am_pm}${hour_12}${minute}"
-          release_tag="Old-1.9-${current_date}-${time_part}-${rom_type}_${unique_id}"
+          # 生成唯一标签 (格式: Old-1.9-20251023-MIUI-1234)
+          release_tag="Old-1.9-${current_date}-${rom_type}-${unique_id}"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           echo "Generated unique release tag: $release_tag"
              
