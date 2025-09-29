@@ -103,7 +103,7 @@ jobs:
           
           echo "✅ Environment initialization complete (环境初始化完成)"
           
-      - name: "🔧 Find and Link e2fsdroid (查找并链接e2fsdroid)"
+      - name: "🔧 Try to Find and Link e2fsdroid (尝试查找并链接e2fsdroid)"
         run: |
           echo "🔍 Searching for e2fsdroid on system (在系统中搜索e2fsdroid)..."
           
@@ -137,16 +137,18 @@ jobs:
             e2fsdroid_path=$(find /usr -name "e2fsdroid" 2>/dev/null | head -1)
             if [[ -n "$e2fsdroid_path" && -f "$e2fsdroid_path" && -x "$e2fsdroid_path" ]]; then
               echo "✅ Found e2fsdroid using find: $e2fsdroid_path"
-            else
-              echo "::error::❌ e2fsdroid not found on system (系统中未找到e2fsdroid)"
-              exit 1
             fi
           fi
           
-          # Create bin directory and link e2fsdroid (创建bin目录并链接e2fsdroid)
-          mkdir -p SGSI-build-tool/10/bin
-          ln -sf "$e2fsdroid_path" SGSI-build-tool/10/bin/e2fsdroid
-          echo "✅ Linked e2fsdroid to: SGSI-build-tool/10/bin/e2fsdroid"
+          # Create bin directory and link e2fsdroid if found (如果找到e2fsdroid，创建bin目录并链接)
+          if [[ -n "$e2fsdroid_path" ]]; then
+            mkdir -p SGSI-build-tool/10/bin
+            ln -sf "$e2fsdroid_path" SGSI-build-tool/10/bin/e2fsdroid
+            echo "✅ Linked e2fsdroid to: SGSI-build-tool/10/bin/e2fsdroid"
+          else
+            echo "⚠️ e2fsdroid not found on system, skipping (系统中未找到e2fsdroid，跳过)"
+            echo "This may cause issues with some ROM types, but the build will continue (这可能会导致某些ROM类型出现问题，但构建将继续)"
+          fi
           
       - name: "🔧 Fix Toolchain Issues (修复工具链问题)"
         run: |
