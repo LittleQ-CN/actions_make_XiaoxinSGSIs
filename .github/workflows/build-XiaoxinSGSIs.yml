@@ -60,23 +60,11 @@ jobs:
             echo "make_super=$(jq -r '.make_super // "false"' sgsi.json)"
           } >> $GITHUB_OUTPUT
            
-      - name: "📦 Install Required Tools (安装必要工具)"
+      - name: "📦 Install Essential Tools (安装基础工具)"
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            aria2 \
-            curl \
-            jq \
-            brotli \
-            android-sdk-libsparse-utils \
-            python3 \
-            python3-pip \
-            p7zip-full \
-            zip \
-            unzip \
-            e2fsprogs
-          
-          echo "✅ Tools installation complete (工具安装完成)"
+          sudo apt-get install -y aria2 curl jq brotli android-sdk-libsparse-utils
+          echo "✅ 基础工具安装完成"
           
       - name: "⬇️ Download Build Tools (下载构建工具)"
         run: |
@@ -115,36 +103,50 @@ jobs:
           
           echo "✅ Environment initialization complete (环境初始化完成)"
           
-      - name: "🔧 Install e2fsdroid from alternative source (从替代源安装e2fsdroid)"
+      - name: "🔧 Find and Link e2fsdroid (查找并链接e2fsdroid)"
         run: |
-          echo "Installing e2fsdroid from alternative source (从替代源安装e2fsdroid)..."
+          echo "🔍 Searching for e2fsdroid on system (在系统中搜索e2fsdroid)..."
           
-          # Try to install e2fsdroid from a different package (尝试从不同的包安装e2fsdroid)
-          if ! sudo apt-get install -y android-sdk-ext4-utils; then
-            echo "::warning::⚠️ android-sdk-ext4-utils not available, trying manual installation (android-sdk-ext4-utils不可用，尝试手动安装)"
-            
-            # Manual installation of e2fsdroid (手动安装e2fsdroid)
-            cd /tmp
-            wget https://github.com/LineageOS/android_system_extras/raw/ext4-utils-8.1/ext4_utils/e2fsdroid.c
-            wget https://github.com/LineageOS/android_system_extras/raw/ext4-utils-8.1/ext4_utils/make_ext4fs.h
-            
-            # Try to compile e2fsdroid (尝试编译e2fsdroid)
-            if command -v gcc >/dev/null 2>&1; then
-              echo "Compiling e2fsdroid from source (从源代码编译e2fsdroid)..."
-              gcc -I. e2fsdroid.c -o e2fsdroid -lselinux -lsparse -lz
-              if [ -f "e2fsdroid" ]; then
-                sudo mv e2fsdroid /usr/local/bin/
-                sudo chmod +x /usr/local/bin/e2fsdroid
-                echo "✅ e2fsdroid compiled and installed successfully (e2fsdroid编译并安装成功)"
-              else
-                echo "::warning::⚠️ Failed to compile e2fsdroid (编译e2fsdroid失败)"
+          # List all possible locations where e2fsdroid might be (列出e2fsdroid可能存在的所有位置)
+          possible_paths=(
+            "/usr/bin/e2fsdroid"
+            "/usr/local/bin/e2fsdroid"
+            "/bin/e2fsdroid"
+            "/sbin/e2fsdroid"
+            "/usr/sbin/e2fsdroid"
+            "/usr/lib/android-sdk/build-tools/*/e2fsdroid"
+            "/usr/lib/android-sdk/platform-tools/e2fsdroid"
+            "/opt/android-sdk/build-tools/*/e2fsdroid"
+          )
+          
+          # Search for e2fsdroid in the system (在系统中搜索e2fsdroid)
+          e2fsdroid_path=""
+          for path_pattern in "${possible_paths[@]}"; do
+            expanded_paths=$(ls $path_pattern 2>/dev/null || true)
+            for path in $expanded_paths; do
+              if [[ -f "$path" && -x "$path" ]]; then
+                e2fsdroid_path="$path"
+                echo "✅ Found e2fsdroid at: $e2fsdroid_path"
+                break 2
               fi
+            done
+          done
+          
+          # If not found, try using find command (如果没有找到，尝试使用find命令)
+          if [[ -z "$e2fsdroid_path" ]]; then
+            e2fsdroid_path=$(find /usr -name "e2fsdroid" 2>/dev/null | head -1)
+            if [[ -n "$e2fsdroid_path" && -f "$e2fsdroid_path" && -x "$e2fsdroid_path" ]]; then
+              echo "✅ Found e2fsdroid using find: $e2fsdroid_path"
             else
-              echo "::warning::⚠️ gcc not available, cannot compile e2fsdroid (gcc不可用，无法编译e2fsdroid)"
+              echo "::error::❌ e2fsdroid not found on system (系统中未找到e2fsdroid)"
+              exit 1
             fi
-          else
-            echo "✅ android-sdk-ext4-utils installed successfully (android-sdk-ext4-utils安装成功)"
           fi
+          
+          # Create bin directory and link e2fsdroid (创建bin目录并链接e2fsdroid)
+          mkdir -p SGSI-build-tool/10/bin
+          ln -sf "$e2fsdroid_path" SGSI-build-tool/10/bin/e2fsdroid
+          echo "✅ Linked e2fsdroid to: SGSI-build-tool/10/bin/e2fsdroid"
           
       - name: "🔧 Fix Toolchain Issues (修复工具链问题)"
         run: |
@@ -155,24 +157,13 @@ jobs:
           sudo mkdir -p bin
           
           # Create symbolic links for essential tools only (仅为必要工具创建符号链接)
-          for tool in brotli simg2img img2simg mke2fs e2fsdroid; do
+          for tool in brotli simg2img img2simg mke2fs; do
             tool_location=$(which $tool 2>/dev/null)
             if [[ -n "$tool_location" ]]; then
               sudo ln -sf "$tool_location" bin/$tool
               echo "✅ Linked $tool from $tool_location"
             else
               echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
-              # For e2fsdroid, try to find it in alternative locations (对于e2fsdroid，尝试在其他位置查找)
-              if [[ "$tool" == "e2fsdroid" ]]; then
-                alt_location=$(find /usr -name "e2fsdroid" 2>/dev/null | head -1)
-                if [[ -n "$alt_location" ]]; then
-                  sudo ln -sf "$alt_location" bin/$tool
-                  echo "✅ Linked $tool from alternative location: $alt_location"
-                else
-                  echo "::error::❌ Required tool not found: $tool (未找到必需工具: $tool)"
-                  exit 1
-                fi
-              fi
             fi
           done
           
@@ -278,12 +269,12 @@ jobs:
           
           # Apply ROM-specific fix scripts (应用ROM特定的修复脚本)
           if [[ -f "fix/${rom_type}.sh" ]]; then
-            echo "Applying $rom_type configuration script (应用$rom类型配置脚本)..."
+            echo "Applying $rom_type configuration script (应用$rom_type配置脚本)..."
             sudo cp "fix/${rom_type}.sh" SGSI-build-tool/10/fixbug/fixbug.sh
             sudo chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-            echo "$rom_type configuration completed ($rom类型配置完成)"
+            echo "$rom_type configuration completed ($rom_type配置完成)"
           else
-            echo "ℹ️ $rom_type configuration script not found, using generic configuration (找不到$rom类型配置脚本，使用通用配置)"
+            echo "ℹ️ $rom_type configuration script not found, using generic configuration (找不到$rom_type配置脚本，使用通用配置)"
           fi
             
           echo "ROM-specific configuration completed (ROM特定设置配置完成)"
@@ -322,7 +313,7 @@ jobs:
           
           # Update symbolic links (更新符号链接)
           cd SGSI-build-tool/10
-          for tool in brotli simg2img e2fsdroid; do
+          for tool in brotli simg2img; do
             if command -v $tool >/dev/null 2>&1; then
               sudo ln -sf $(which $tool) bin/$tool
             fi
