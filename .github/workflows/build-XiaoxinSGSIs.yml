@@ -74,7 +74,8 @@ jobs:
             p7zip-full \
             zip \
             unzip \
-            e2fsprogs
+            e2fsprogs \
+            android-tools-fsutils
           
           echo "✅ Tools installation complete (工具安装完成)"
           
@@ -124,14 +125,24 @@ jobs:
           sudo mkdir -p bin
           
           # Create symbolic links for essential tools only (仅为必要工具创建符号链接)
-          for tool in brotli simg2img img2simg mke2fs; do
+          for tool in brotli simg2img img2simg mke2fs e2fsdroid; do
             tool_location=$(which $tool 2>/dev/null)
             if [[ -n "$tool_location" ]]; then
               sudo ln -sf "$tool_location" bin/$tool
               echo "✅ Linked $tool from $tool_location"
             else
-              echo "::error::❌ Required tool not found: $tool (未找到必需工具: $tool)"
-              exit 1
+              echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
+              # For e2fsdroid, try to find it in alternative locations (对于e2fsdroid，尝试在其他位置查找)
+              if [[ "$tool" == "e2fsdroid" ]]; then
+                alt_location=$(find /usr -name "e2fsdroid" 2>/dev/null | head -1)
+                if [[ -n "$alt_location" ]]; then
+                  sudo ln -sf "$alt_location" bin/$tool
+                  echo "✅ Linked $tool from alternative location: $alt_location"
+                else
+                  echo "::error::❌ Required tool not found: $tool (未找到必需工具: $tool)"
+                  exit 1
+                fi
+              fi
             fi
           done
           
@@ -276,12 +287,12 @@ jobs:
           if [[ -d "bin" ]]; then
             echo "Moving binary tools (移动二进制工具)..."
             sudo mkdir -p SGSI-build-tool/10/bin
-            sudo cp -v bin/mke2fs SGSI-build-tool/10/bin/
+            sudo cp -v bin/* SGSI-build-tool/10/bin/
           fi
           
           # Update symbolic links (更新符号链接)
           cd SGSI-build-tool/10
-          for tool in brotli simg2img; do
+          for tool in brotli simg2img e2fsdroid; do
             if command -v $tool >/dev/null 2>&1; then
               sudo ln -sf $(which $tool) bin/$tool
             fi
@@ -325,16 +336,20 @@ jobs:
           # Create output filename (创建输出文件名)
           output_file="${{ steps.config.outputs.pack_sgsi }}"
           
+          # Fix file ownership before packaging (打包前修复文件所有权)
+          echo "Fixing file ownership (修复文件所有权)..."
+          sudo chown -R $(id -u):$(id -g) SGSI/
+          
           # Package files (打包文件)
           echo "Packaging SGSI to: $output_file"
-          if ! sudo zip -r "$output_file" SGSI/*; then
+          if ! zip -r "$output_file" SGSI/*; then
             echo "::error::❌ Packaging failed! (打包失败！)"
             exit 1
           fi
           
           # Prepare upload directory (准备上传目录)
-          sudo mkdir -p "${GITHUB_WORKSPACE}/upload"
-          file_size=$(sudo stat -c%s "$output_file")
+          mkdir -p "${GITHUB_WORKSPACE}/upload"
+          file_size=$(stat -c%s "$output_file")
           max_size=2000000000  # 2GB
           
           # Check file size and split if needed (检查文件大小并在需要时分卷)
@@ -343,23 +358,25 @@ jobs:
             exit 1
           fi
           
+          echo "File size: $(numfmt --to=iec-i $file_size) (文件大小)"
+          
           if [[ $file_size -gt $max_size ]]; then
-            echo "⚠️ File too large ($(numfmt --to=iec-i $file_size)), splitting into parts (文件过大，进行分卷打包)..."
-            sudo split -b 1000m -d -a 1 "$output_file" "${output_file}_part"
+            echo "⚠️ File too large, splitting into parts (文件过大，进行分卷打包)..."
+            split -b 1500m -d -a 1 "$output_file" "${output_file}_part"
             # Move split files to upload directory (移动分卷文件到上传目录)
-            sudo mv "${output_file}_part"* "${GITHUB_WORKSPACE}/upload/"
+            mv "${output_file}_part"* "${GITHUB_WORKSPACE}/upload/"
             # Delete original large file (删除原始大文件)
-            sudo rm "$output_file"
+            rm "$output_file"
             echo "Split file list (分卷文件列表):"
-            sudo ls -lh "${GITHUB_WORKSPACE}/upload"
+            ls -lh "${GITHUB_WORKSPACE}/upload"
           else
             echo "Moving file to upload directory (移动文件到上传目录)"
-            sudo mv "$output_file" "${GITHUB_WORKSPACE}/upload/"
+            mv "$output_file" "${GITHUB_WORKSPACE}/upload/"
           fi
           
           # Ensure upload directory has content (确保上传目录有内容)
           echo "=== Upload directory contents (上传目录内容) ==="
-          sudo ls -lh "${GITHUB_WORKSPACE}/upload" || true
+          ls -lh "${GITHUB_WORKSPACE}/upload" || true
           echo "===================="
           
           # Save upload directory path (保存上传目录路径)
@@ -381,9 +398,11 @@ jobs:
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
           # Generate unique tag to avoid conflicts (生成唯一标签以避免冲突)
-          release_tag="${current_date}_${timestamp}_${rom_type}"
+          release_tag="${current_date}_${timestamp}"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
+          echo "rom_type=$rom_type" >> $GITHUB_OUTPUT
           echo "Generated release tag: $release_tag (生成的发布标签: $release_tag)"
+          echo "ROM type: $rom_type (ROM 类型: $rom_type)"
              
       - name: "🚀 Create Release with Unique Tag (使用唯一标签创建发布)"
         uses: softprops/action-gh-release@v1
@@ -392,20 +411,15 @@ jobs:
           tag_name: "${{ steps.release_tag.outputs.release_tag }}"
           files: "${{ env.UPLOAD_DIR }}/*"
           body: |
-            This is an automated SGSI build.
-            这是一个自动构建的SGSI镜像。
+            ## SGSI Build Information (构建信息)
+            
+            **Built at (构建时间):** ${{ steps.release_tag.outputs.release_tag }}
+            
+            **ROM Type (ROM 类型):** ${{ steps.release_tag.outputs.rom_type }} [自动识别]
             
             ---
-            Built at: ${{ steps.release_tag.outputs.release_tag }}
-            ROM Type: $rom_type
             
-            ---
-            👉 How to use:
-            1. Flash to your device
-            2. Reboot
-            3. Enjoy!
-            
-            🔧 Note: This is an experimental build.
+            🔧 **Note (注意):** This is an experimental build. (这是一个实验性构建)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
              
