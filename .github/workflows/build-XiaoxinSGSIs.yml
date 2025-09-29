@@ -74,8 +74,7 @@ jobs:
             p7zip-full \
             zip \
             unzip \
-            e2fsprogs \
-            android-tools-fsutils
+            e2fsprogs
           
           echo "✅ Tools installation complete (工具安装完成)"
           
@@ -115,6 +114,37 @@ jobs:
           sudo find SGSI-build-tool -name "*.sh" -exec chmod +x {} \;
           
           echo "✅ Environment initialization complete (环境初始化完成)"
+          
+      - name: "🔧 Install e2fsdroid from alternative source (从替代源安装e2fsdroid)"
+        run: |
+          echo "Installing e2fsdroid from alternative source (从替代源安装e2fsdroid)..."
+          
+          # Try to install e2fsdroid from a different package (尝试从不同的包安装e2fsdroid)
+          if ! sudo apt-get install -y android-sdk-ext4-utils; then
+            echo "::warning::⚠️ android-sdk-ext4-utils not available, trying manual installation (android-sdk-ext4-utils不可用，尝试手动安装)"
+            
+            # Manual installation of e2fsdroid (手动安装e2fsdroid)
+            cd /tmp
+            wget https://github.com/LineageOS/android_system_extras/raw/ext4-utils-8.1/ext4_utils/e2fsdroid.c
+            wget https://github.com/LineageOS/android_system_extras/raw/ext4-utils-8.1/ext4_utils/make_ext4fs.h
+            
+            # Try to compile e2fsdroid (尝试编译e2fsdroid)
+            if command -v gcc >/dev/null 2>&1; then
+              echo "Compiling e2fsdroid from source (从源代码编译e2fsdroid)..."
+              gcc -I. e2fsdroid.c -o e2fsdroid -lselinux -lsparse -lz
+              if [ -f "e2fsdroid" ]; then
+                sudo mv e2fsdroid /usr/local/bin/
+                sudo chmod +x /usr/local/bin/e2fsdroid
+                echo "✅ e2fsdroid compiled and installed successfully (e2fsdroid编译并安装成功)"
+              else
+                echo "::warning::⚠️ Failed to compile e2fsdroid (编译e2fsdroid失败)"
+              fi
+            else
+              echo "::warning::⚠️ gcc not available, cannot compile e2fsdroid (gcc不可用，无法编译e2fsdroid)"
+            fi
+          else
+            echo "✅ android-sdk-ext4-utils installed successfully (android-sdk-ext4-utils安装成功)"
+          fi
           
       - name: "🔧 Fix Toolchain Issues (修复工具链问题)"
         run: |
@@ -248,12 +278,12 @@ jobs:
           
           # Apply ROM-specific fix scripts (应用ROM特定的修复脚本)
           if [[ -f "fix/${rom_type}.sh" ]]; then
-            echo "Applying $rom_type configuration script (应用$rom_type配置脚本)..."
+            echo "Applying $rom_type configuration script (应用$rom类型配置脚本)..."
             sudo cp "fix/${rom_type}.sh" SGSI-build-tool/10/fixbug/fixbug.sh
             sudo chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-            echo "$rom_type configuration completed ($rom_type配置完成)"
+            echo "$rom_type configuration completed ($rom类型配置完成)"
           else
-            echo "ℹ️ $rom_type configuration script not found, using generic configuration (找不到$rom_type配置脚本，使用通用配置)"
+            echo "ℹ️ $rom_type configuration script not found, using generic configuration (找不到$rom类型配置脚本，使用通用配置)"
           fi
             
           echo "ROM-specific configuration completed (ROM特定设置配置完成)"
