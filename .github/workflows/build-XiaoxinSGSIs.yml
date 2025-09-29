@@ -24,8 +24,6 @@ jobs:
           # Check sgsi.sh file (检查sgsi.sh文件)
           if [[ -f "SGSI-build-tool/10/sgsi.sh" ]]; then
             echo "✅ Detected configured sgsi.sh file (检测到已配置sgsi.sh文件)"
-            echo "File content preview (文件内容预览):"
-            head -10 SGSI-build-tool/10/sgsi.sh || true
           else
             echo "ℹ️ No custom sgsi.sh detected, using default config (未检测到自定义sgsi.sh文件，将使用默认配置)"
           fi
@@ -33,8 +31,6 @@ jobs:
       - name: "🧹 Clean Up Environment (清理环境)"
         run: |
           echo "🗑️ Starting full cleanup (启动全面清理)..."
-          # Use safer cleanup commands (使用更安全的清理命令)
-          sudo docker system prune -af >/dev/null 2>&1 || true
           sudo apt-get autoremove -y --purge
           sudo apt-get clean
           sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d || true
@@ -77,7 +73,8 @@ jobs:
             python3-pip \
             p7zip-full \
             zip \
-            unzip
+            unzip \
+            e2fsprogs  # 安装e2fsprogs包，包含e2fsdroid
           
           echo "✅ Tools installation complete (工具安装完成)"
           
@@ -116,20 +113,6 @@ jobs:
           # Set execute permissions (设置执行权限)
           sudo find SGSI-build-tool -name "*.sh" -exec chmod +x {} \;
           
-          echo "🔄 Preparing to run environment setup script (准备运行环境设置脚本)..."
-          if [[ -f "SGSI-build-tool/10/setup.sh" ]]; then
-            echo "🔧 Running environment setup script (运行环境设置脚本)..."
-            cd SGSI-build-tool/10
-            # Capture setup.sh output and errors (捕获setup.sh输出和错误)
-            if ! sudo bash setup.sh 2>&1 | tee setup.log; then
-              echo "::warning::⚠️ Setup script returned non-zero status, continuing after checking log (安装脚本返回非零状态，检查日志后继续)"
-              cat setup.log
-            fi
-            cd ../..
-          else
-            echo "::warning::⚠️ setup.sh script not found, skipping environment setup (未找到setup.sh脚本，跳过环境设置)"
-          fi
-          
           echo "✅ Environment initialization complete (环境初始化完成)"
           
       - name: "🔧 Fix Toolchain Issues (修复工具链问题)"
@@ -146,7 +129,13 @@ jobs:
               sudo ln -sf $(which $tool) bin/$tool
               echo "✅ Linked $tool"
             else
-              echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
+              # 仅对e2fsdroid发出警告，其他工具缺失则报错
+              if [ "$tool" = "e2fsdroid" ]; then
+                echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
+              else
+                echo "::error::❌ Required tool not found: $tool (未找到必需工具: $tool)"
+                exit 1
+              fi
             fi
           done
           
@@ -380,7 +369,7 @@ jobs:
         run: |
           current_date=$(date +"%Y%m%d")
           
-          # Detect ROM type (检测ROM类型)
+          # Determine ROM type based on config (根据配置确定ROM类型)
           rom_type="Generic"
           if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
@@ -389,21 +378,34 @@ jobs:
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
-          # Add unique identifier to avoid conflicts (添加唯一标识符以避免冲突)
+          # Add unique identifier (添加唯一标识符)
           unique_id=$(echo $GITHUB_RUN_ID | tail -c 4)
           
-          # Generate unique tag (生成唯一标签)
-          release_tag="Lasted-1.9-${current_date}-${rom_type}-${unique_id}"
+          # Generate release tag (生成发布标签)
+          release_tag="${current_date}_${rom_type}_${unique_id}"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           echo "Generated release tag: $release_tag (生成的发布标签: $release_tag)"
              
       - name: "🚀 Upload Build Artifacts (上传构建产物)"
-        uses: actions/upload-artifact@v4
+        uses: ncipollo/release-action@v1.11.0
         with:
-          name: ${{ steps.release_tag.outputs.release_tag }}
-          path: ${{ env.UPLOAD_DIR }}/*
-          if-no-files-found: error
-          
+          artifacts: "${{ env.UPLOAD_DIR }}/*"
+          name: "xiaoxinSGSI-ab-Android10-unpack"
+          tag: "${{ steps.release_tag.outputs.release_tag }}"
+          token: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        id: upload-step
+        
+      - name: "✅ Check Upload Status (检查上传状态)"
+        run: |
+          if [ "${{ steps.upload-step.outcome }}" != "success" ]; then
+            echo "::warning::⚠️ Release upload may have issues, but continuing (发布上传可能有问题，但继续执行)"
+            echo "Upload artifacts directory contents (上传产物目录内容):"
+            ls -la "${{ env.UPLOAD_DIR }}" || true
+          else
+            echo "🎉 Release created successfully! (发布创建成功！)"
+          fi
+             
       - name: "✅ Completion Notification (完成通知)"
         if: success()
         run: |
