@@ -85,7 +85,7 @@ jobs:
                 echo "::error::❌ Build tools download failed (构建工具下载失败)"
                 exit 1
               fi
-              echo "🔄 Retrying in ${retry_delay} seconds (${retry_delay}秒后重试)..."
+              echo "🔄 Retrying in ${retry_delay}seconds (${retry_delay}秒后重试)..."
               sleep $retry_delay
             fi
           done
@@ -119,7 +119,7 @@ jobs:
               echo "✅ Linked $tool from $tool_location"
             else
               echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
-            fi
+            end
           done
           
           echo "✅ Essential binary tools linked (必需二进制工具链接完成)"
@@ -173,7 +173,7 @@ jobs:
               exit 1
             fi
             
-            echo "🔄 Retrying in ${retry_delay} seconds (${retry_delay}秒后重试)..."
+            echo "🔄 Retrying in ${retry_delay}seconds (${retry_delay}秒后重试)..."
             sleep $retry_delay
           done
           
@@ -296,19 +296,53 @@ jobs:
           
           echo "🎉 SGSI image build completed (SGSI镜像构建完成)"
           
-          # Extract device model information from build.prop (从build.prop提取设备机型信息)
+          # Fix permissions for build output files (修复构建产出文件权限)
+          echo "🔒 Fixing permissions for build output files (修复构建产出文件权限)..."
+          sudo chown -R $(id -u):$(id -g) out/
+          sudo chmod -R 755 out/
+          
+          # Extract detailed device information from build.prop (从build.prop提取详细设备信息)
           if [[ -f "./out/system/system/build.prop" ]]; then
-            model=$(grep 'ro.product.model' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || true)
-            if [[ -n "$model" ]]; then
-              echo "📱 Extracted device model: $model (提取的设备机型: $model)"
-              echo "model=$model" >> $GITHUB_OUTPUT
-            else
-              echo "⚠️ Could not extract model information from build.prop (无法从build.prop提取机型信息)"
-              echo "model=Unknown" >> $GITHUB_OUTPUT
-            fi
+            # Device model (设备型号)
+            model=$(grep 'ro.product.model' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            echo "📱 Extracted device model: $model (提取的设备型号: $model)"
+            
+            # Security patch date (安全补丁日期)
+            security_patch=$(grep 'ro.build.version.security_patch' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            echo "🔒 Security patch date: $security_patch (安全补丁日期: $security_patch)"
+            
+            # Android version (Android版本号)
+            android_version=$(grep 'ro.build.version.release' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            echo "📱 Android version: $android_version (Android版本号: $android_version)"
+            
+            # Build date (构建日期)
+            build_date=$(grep 'ro.build.date' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            echo "📅 Build date: $build_date (构建日期: $build_date)"
+            
+            # ROM-specific version info (ROM特定版本信息)
+            # Try multiple possible keys for different ROM types (尝试多种可能的键名以适应不同ROM类型)
+            rom_version=$(grep -E 'ro.(build|system|product).(version|display).(incremental|id|name)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            echo "🔄 ROM version: $rom_version (ROM版本: $rom_version)"
+            
+            # Build ID (构建ID)
+            build_id=$(grep 'ro.build.id' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            echo "🆔 Build ID: $build_id (构建ID: $build_id)"
+            
+            # Output all extracted information (输出所有提取的信息)
+            echo "model=$model" >> $GITHUB_OUTPUT
+            echo "security_patch=$security_patch" >> $GITHUB_OUTPUT
+            echo "android_version=$android_version" >> $GITHUB_OUTPUT
+            echo "build_date=$build_date" >> $GITHUB_OUTPUT
+            echo "rom_version=$rom_version" >> $GITHUB_OUTPUT
+            echo "build_id=$build_id" >> $GITHUB_OUTPUT
           else
             echo "⚠️ build.prop file not found (未找到build.prop文件)"
             echo "model=Unknown" >> $GITHUB_OUTPUT
+            echo "security_patch=Unknown" >> $GITHUB_OUTPUT
+            echo "android_version=Unknown" >> $GITHUB_OUTPUT
+            echo "build_date=Unknown" >> $GITHUB_OUTPUT
+            echo "rom_version=Unknown" >> $GITHUB_OUTPUT
+            echo "build_id=Unknown" >> $GITHUB_OUTPUT
           fi
            
       - name: "📦 Package Output Files (打包输出文件)"
@@ -410,6 +444,16 @@ jobs:
             **ROM 类型 (ROM Type):** ${{ steps.release_tag.outputs.rom_type }} [自动识别]
             
             **原包机型 (Source Device):** ${{ steps.build_sgsi.outputs.model }}
+            
+            **Android 版本 (Android Version):** ${{ steps.build_sgsi.outputs.android_version }}
+            
+            **安全补丁日期 (Security Patch):** ${{ steps.build_sgsi.outputs.security_patch }}
+            
+            **源构建日期 (Source Build Date):** ${{ steps.build_sgsi.outputs.build_date }}
+            
+            **ROM 版本 (ROM Version):** ${{ steps.build_sgsi.outputs.rom_version }}
+            
+            **构建 ID (Build ID):** ${{ steps.build_sgsi.outputs.build_id }}
             
             **构建工具 (Build Tools):** XiaoxinTools_1.9 (Only_Android10/AB)
             
