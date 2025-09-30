@@ -1,4 +1,4 @@
-name: build_XiaoxinSGSIs_2.1_Ai-test
+name: build_XiaoxinSGSIs_old_test
 
 on:
   watch:
@@ -10,20 +10,20 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@main
-       
-      - name: Clean up environment
+        
+      - name: Clean Up
         run: |
-          docker rmi $(docker images -q) || true
-          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d || true
+          sudo docker rmi $(docker images -q) || true
+          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
           sudo -E apt-get -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* powershell openjdk* mysql* php* || true
           sudo -E apt-get update
           sudo -E apt-get -y autoremove --purge
           sudo -E apt-get clean 
           df -h
-       
-      - name: Get build variables
+      
+      - name: Get variables
         id: var
         run: |
           echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUTPUT
@@ -36,7 +36,7 @@ jobs:
           echo "make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_super=$(jq -r '.make_super' sgsi.json)" >> $GITHUB_OUTPUT
-           
+          
       - name: Download build tools
         run: |
           tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
@@ -56,98 +56,95 @@ jobs:
             echo "::error::Build tools download failed"
             exit 1
           fi
-          
-      - name: Initialize environment
+            
+      - name: Initialization environment
         run: |
           sudo tar -xf SGSI-build-tool.tar
-          sudo rm -rf SGSI-build-tool/10/setup.sh || true
+          sudo rm -rf SGSI-build-tool/10/setup.sh
           sudo mv bin/setup.sh SGSI-build-tool/10/
           cd SGSI-build-tool/10
           sudo bash setup.sh
-           
-      - name: Download ROM
-        run: |
-          sudo wget -c ${{ steps.var.outputs.rom_url }} -O SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
-       
-      - name: Configure Super SGSI build
-        if: steps.var.outputs.make_super == 'true'
+          
+      - name: Download Rom
+        run: sudo wget -c ${{ steps.var.outputs.rom_url }} -O SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
+      
+      - name: Build Super SGSI
+        if: ${{ steps.var.outputs.make_super == 'true' }}
         run: |
           sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
-       
-      - name: Configure MIUI SGSI build
-        if: steps.var.outputs.make_miui == 'true'
+      
+      - name: Make MIUI SGSI
+        if: ${{ steps.var.outputs.make_miui == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh || true
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-      - name: Configure Flyme SGSI build
-        if: steps.var.outputs.make_flyme == 'true'
+          
+      - name: Make Flyme SGSI
+        if: ${{ steps.var.outputs.make_flyme == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh || true
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-      - name: Configure ColorOS SGSI build
-        if: steps.var.outputs.make_coloros == 'true'
+          
+      - name: Make ColorOS SGSI
+        if: ${{ steps.var.outputs.make_coloros == 'true' }}
         run: |
           sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
-          sudo rm -rf SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh || true
+          sudo rm -rf SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} 
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-      - name: Configure H2OS SGSI build
-        if: steps.var.outputs.make_h2os == 'true'
+          
+      - name: Make H2OS SGSI
+        if: ${{ steps.var.outputs.make_h2os == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh || true
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-      - name: Configure SmartisanOS SGSI build
-        if: steps.var.outputs.make_smartisanos == 'true'
+          
+      - name: Make SmartisanOS SGSI
+        if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh || true
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
-           
-      - name: Configure ZUI SGSI build
-        if: steps.var.outputs.make_zui == 'true'
+          
+      - name: Make ZUI SGSI
+        if: ${{ steps.var.outputs.make_zui == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh || true
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
-            
-      - name: Generate SGSI images
+           
+      - name: Generate SGSI
         run: |
           rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
           mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
           mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
           cd SGSI-build-tool/10
           sudo bash make.sh
-           
-      - name: Create patch archives
+          
+      - name: Zip Patch  
         run: |
           zip -r Patch1.zip Patch/Patch1/*
           zip -r Patch2.zip Patch/Patch2/*
           zip -r Patch3.zip Patch/Patch3/*
           sudo mv Patch1.zip Patch2.zip Patch3.zip SGSI-build-tool/10/SGSI/
 
-      - name: Package SGSI files
+      - name: Zip SGSI
         run: |
           mkdir -p upload
           cd SGSI-build-tool/10/SGSI
-          zip -r ${{ steps.var.outputs.pack_sgsi }} *
-          cd ../../..
-          mv ${{ steps.var.outputs.pack_sgsi }} upload/
+          zip -r ../../../${{ steps.var.outputs.pack_sgsi }} *
+          cd ../../../
           
-          file_size=$(du -sb upload/${{ steps.var.outputs.pack_sgsi }} | awk '{print $1}')
-          if [ $file_size -gt 2097152000 ]; then
-            echo "Splitting large file into parts..."
-            cd upload
-            split -b 1024m ${{ steps.var.outputs.pack_sgsi }} ${{ steps.var.outputs.pack_sgsi }}_
-            rm ${{ steps.var.outputs.pack_sgsi }}
-            cd ..
+          if [ $(stat -c%s "${{ steps.var.outputs.pack_sgsi }}") -gt 2097152000 ]; then
+            echo "Splitting package..."
+            split -b 1024m "${{ steps.var.outputs.pack_sgsi }}" "upload/${{ steps.var.outputs.pack_sgsi }}_part"
+          else
+            mv "${{ steps.var.outputs.pack_sgsi }}" upload/
           fi
-          ls -lh upload
-             
-      - name: Upload SGSI to release
+          ls -lh upload/
+          
+      - name: Upload SGSI to action-gh-release
         uses: ncipollo/release-action@v1.8.6
         with:
-          artifacts: upload/*
+          artifacts: 'upload/*'
           name: xiaoxinSGSI-ab-Android10-unpack
           tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}
           token: ${{ secrets.GITHUB_TOKEN }}
