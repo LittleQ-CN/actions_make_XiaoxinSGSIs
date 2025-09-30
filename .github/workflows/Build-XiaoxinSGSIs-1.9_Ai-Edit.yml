@@ -10,10 +10,10 @@ jobs:
       - name: "Checkout Code (检出代码)"
         uses: actions/checkout@v4
         
-      - name: "Check Config Status (检查配置文件极 status)"
+      - name: "Check Config Status (检查配置文件 status)"
         run: |
           # Check sgsi.json config file (检查sgsi.json配置文件)
-          if [[ ! -f "sg极 si.json" ]]; then
+          if [[ ! -f "sg si.json" ]]; then
             echo "::error::❌ Missing sgsi.json config file (缺少sgsi.json配置文件)"
             exit 1
           fi
@@ -52,7 +52,7 @@ jobs:
             echo "make_flyme=$(jq -r '.make_flyme // "false"' sgsi.json)"
             echo "make_coloros=$(jq -r '.make_coloros // "false"' sgsi.json)"
             echo "make_h2os=$(jq -r '.make_h2os // "false"' sgsi.json)"
-            echo "make_smartisanos=$(j极 -r '.make_smartisanos // "false"' sgsi.json)"
+            echo "make_smartisanos=$(j -r '.make_smartisanos // "false"' sgsi.json)"
             echo "make_zui=$(jq -r '.make_zui // "false"' sgsi.json)"
             echo "make_super=$(jq -r '.make_super // "false"' sgsi.json)"
           } >> $GITHUB_OUTPUT
@@ -188,7 +188,7 @@ jobs:
           if [ "${{ steps.config.outputs.make_coloros }}" = "true" ]; then rom_type="ColorOS"; fi
           if [ "${{ steps.config.outputs.make_h2os }}" = "true" ]; then rom_type="H2OS"; fi
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
-          if极 [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
+          if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
           echo "ℹ️ Detected ROM type: $rom_type (检测到的ROM类型: $rom_type)"
           
@@ -238,7 +238,7 @@ jobs:
           echo "Checking and fixing SGSI.sh script errors (检查并修复SGSI.sh脚本错误)..."
           if [[ -f "SGSI.sh" ]]; then
             # More precise fixes to avoid over-replacement (更精确的修复以避免过度替换)
-            sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/\[ -n "\1" ]/g' SGS极 I.sh
+            sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/\[ -n "\1" ]/g' SGS I.sh
             sudo sed -i 's/==/=/g' SGSI.sh
             echo "✅ Script syntax errors fixed (已修复脚本语法错误)"
           else
@@ -329,7 +329,7 @@ jobs:
             echo "🔄 ROM version: $rom_version (ROM版本: $rom_version)"
             
             # Build ID (构建ID)
-            build_id=$(grep 'ro.build.id' ./out/system/system/build.prop | head -1 | cut -d'=' -f极 2 | tr -d '[:space:]' || echo "Unknown")
+            build_id=$(grep 'ro.build.id' ./out/system/system/build.prop | head -1 | cut -d'=' -f 2 | tr -d '[:space:]' || echo "Unknown")
             echo "🆔 Build ID: $build_id (构建ID: $build_id)"
             
             # Output all extracted information (输出所有提取的信息)
