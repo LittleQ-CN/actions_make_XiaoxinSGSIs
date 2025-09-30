@@ -486,19 +486,19 @@ jobs:
             ## 📱 SGSI Build Information (构建信息)
             
             ### 基础信息 (Basic Info)
-            - **构建时间 (Built at):** ${{ steps.release_tag.outputs.build_time }}  # 修正：中文在前，英文在后
-            - **原包机型 (Source Device):** ${{ steps.release_tag.outputs.source_device }}  # 保持一致：中文在前，英文在后
-            - **ROM 类型 (ROM Type):** ${{ steps.config.outputs.rom_type }}  # 保持一致
-            - **Android 版本 (Android Version):** ${{ steps.build_sgsi.outputs.android_version }}  # 保持一致
-            - **ROM 版本 (ROM Version):** ${{ steps.build_sgsi.outputs.rom_version }}  # 保持一致
-            - **构建 ID (Build ID):** ${{ steps.build_sgsi.outputs.build_id }}  # 保持一致
-            - **安全补丁 (Security Patch):** ${{ steps.build_sgsi.outputs.security_patch }}  # 保持一致
-            - **原构建日期 (Source Build Date):** ${{ steps.release_tag.outputs.formatted_build_date }}  # 保持一致
+            - **构建时间 (Built at):** ${{ steps.release_tag.outputs.build_time }}
+            - **原包机型 (Source Device):** ${{ steps.release_tag.outputs.source_device }}
+            - **ROM 类型 (ROM Type):** ${{ steps.config.outputs.rom_type }}
+            - **Android 版本 (Android Version):** ${{ steps.build_sgsi.outputs.android_version }}
+            - **ROM 版本 (ROM Version):** ${{ steps.build_sgsi.outputs.rom_version }}
+            - **构建 ID (Build ID):** ${{ steps.build_sgsi.outputs.build_id }}
+            - **安全补丁 (Security Patch):** ${{ steps.build_sgsi.outputs.security_patch }}
+            - **原构建日期 (Source Build Date):** ${{ steps.release_tag.outputs.formatted_build_date }}
             
             ### 其他信息 (Other Info)
-            - **构建工具 (Build Tools):** XiaoxinTools_1.9 (Only for Android 10/AB)  # 保持一致
-            - **实验性构建 (Experimental Build):** Yes (可能存在稳定性问题)  # 保持一致
-            - **构建日志 (Build Log):** [View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) (点击查看详细日志)  # 保持一致
+            - **构建工具 (Build Tools):** XiaoxinTools_1.9 (Only for Android 10/AB)
+            - **实验性构建 (Experimental Build):** Yes (可能存在稳定性问题)
+            - **构建日志 (Build Log):** [View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) (点击查看详细日志)
             
             ---
             
