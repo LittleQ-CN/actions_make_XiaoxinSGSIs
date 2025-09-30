@@ -238,7 +238,7 @@ jobs:
           echo "Checking and fixing SGSI.sh script errors (检查并修复SGSI.sh脚本错误)..."
           if [[ -f "SGSI.sh" ]]; then
             # More precise fixes to avoid over-replacement (更精确的修复以避免过度替换)
-            sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/\[ -n "\1" ]/g' SGS I.sh
+            sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/\[ -n "\1" ]/g' SGSI.sh
             sudo sed -i 's/==/=/g' SGSI.sh
             echo "✅ Script syntax errors fixed (已修复脚本语法错误)"
           else
