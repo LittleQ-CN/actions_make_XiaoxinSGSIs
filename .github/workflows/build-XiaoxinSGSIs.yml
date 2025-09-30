@@ -38,8 +38,13 @@ jobs:
           echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_super=$(jq -r '.make_super' sgsi.json)" >> $GITHUB_OUTPUT
           
-      - name: Install axel download utility
-        run: sudo apt-get install -y axel
+      - name: Install download utilities
+        run: |
+          # Install both aria2 and axel as download options
+          sudo apt-get install -y aria2 axel
+          echo "Download utilities installed:"
+          aria2c --version | head -1
+          axel --version
           
       - name: Download build tools
         run: |
@@ -73,22 +78,67 @@ jobs:
         run: |
           echo "Downloading ROM: ${{ steps.var.outputs.rom_name }}"
           rom_path="SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
+          rom_dir=$(dirname "$rom_path")
+          rom_file=$(basename "$rom_path")
           
-          # Use axel for multi-threaded downloading with progress display
+          # Ensure download directory exists
+          sudo mkdir -p "$rom_dir"
+          
           max_retries=3
-          for i in $(seq 1 $max_retries); do
-            if sudo axel -n 10 -a -o "$rom_path" "${{ steps.var.outputs.rom_url }}"; then
-              echo "ROM download successful"
-              break
-            else
-              echo "ROM download attempt $i/$max_retries failed - retrying..."
-              rm -f "$rom_path"
-              sleep 15
+          download_success=false
+          
+          # Prefer aria2 if available
+          if command -v aria2c &> /dev/null; then
+            echo "Using aria2 multi-threaded download"
+            for i in $(seq 1 $max_retries); do
+              if sudo aria2c -x 8 -s 8 -k 1M "${{ steps.var.outputs.rom_url }}" -d "$rom_dir" -o "$rom_file"; then
+                echo "ROM download successful with aria2"
+                download_success=true
+                break
+              else
+                echo "Download attempt $i/$max_retries failed with aria2 - retrying..."
+                sudo rm -f "$rom_path" || true
+                sleep 15
+              fi
+            done
+          fi
+          
+          # If aria2 failed or not available, try axel
+          if [ "$download_success" = false ]; then
+            if command -v axel &> /dev/null; then
+              echo "Using axel multi-threaded download"
+              for i in $(seq 1 $max_retries); do
+                if sudo axel -n 10 -a -o "$rom_path" "${{ steps.var.outputs.rom_url }}"; then
+                  echo "ROM download successful with axel"
+                  download_success=true
+                  break
+                else
+                  echo "Download attempt $i/$max_retries failed with axel - retrying..."
+                  sudo rm -f "$rom_path" || true
+                  sleep 15
+                fi
+              done
             fi
-          done
+          fi
+          
+          # Fallback to curl if both aria2 and axel failed
+          if [ "$download_success" = false ]; then
+            echo "Using curl as fallback download method"
+            for i in $(seq 1 $max_retries); do
+              if sudo curl -fL -o "$rom_path" "${{ steps.var.outputs.rom_url }}"; then
+                echo "ROM download successful with curl"
+                download_success=true
+                break
+              else
+                echo "Download attempt $i/$max_retries failed with curl - retrying..."
+                sudo rm -f "$rom_path" || true
+                sleep 15
+              fi
+            done
+          fi
           
           if [ ! -f "$rom_path" ]; then
-            echo "::error::ROM download failed after $max_retries attempts"
+            echo "::error::ROM download failed after $max_retries attempts with all methods"
             exit 1
           fi
           
@@ -147,10 +197,8 @@ jobs:
           cd SGSI-build-tool/10
           sudo bash make.sh
           
-      # 修复目标目录不存在的问题
       - name: Ensure SGSI directory exists
         run: |
-          # Create the directory if it doesn't exist
           sudo mkdir -p SGSI-build-tool/10/SGSI
           echo "Verified SGSI directory exists"
           
