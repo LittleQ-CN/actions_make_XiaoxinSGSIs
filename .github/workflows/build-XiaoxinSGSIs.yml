@@ -10,10 +10,10 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: "📋 Checkout Code (检出代码)"
+      - name: "Checkout Code (检出代码)"
         uses: actions/checkout@v4
         
-      - name: "📋 Check Config Status (检查配置文件状态)"
+      - name: "Check Config Status (检查配置文件状态)"
         run: |
           # Check sgsi.json config file (检查sgsi.json配置文件)
           if [[ ! -f "sgsi.json" ]]; then
@@ -28,7 +28,7 @@ jobs:
             echo "ℹ️ No custom sgsi.sh detected, using default config (未检测到自定义sgsi.sh文件，将使用默认配置)"
           fi
        
-      - name: "🧹 Clean Up Environment (清理环境)"
+      - name: "Clean Up Environment (清理环境)"
         run: |
           echo "🗑️ Starting full cleanup (启动全面清理)..."
           sudo apt-get autoremove -y --purge
@@ -37,7 +37,7 @@ jobs:
           echo "✅ Cleanup complete! Disk space (清理完成！磁盘空间):"
           df -h
        
-      - name: "⚙️ Parse Config Variables (解析配置变量)"
+      - name: "Parse Config Variables (解析配置变量)"
         id: config
         run: |
           # Use more robust JSON parsing (使用更健壮的JSON解析方式)
@@ -60,13 +60,13 @@ jobs:
             echo "make_super=$(jq -r '.make_super // "false"' sgsi.json)"
           } >> $GITHUB_OUTPUT
            
-      - name: "📦 Install Essential Tools (安装基础工具)"
+      - name: "Install Essential Tools (安装基础工具)"
         run: |
           sudo apt-get update
           sudo apt-get install -y aria2 curl jq brotli android-sdk-libsparse-utils
           echo "✅ 基础工具安装完成"
           
-      - name: "⬇️ Download Build Tools (下载构建工具)"
+      - name: "Download Build Tools (下载构建工具)"
         run: |
           tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
           filename="SGSI-build-tool.tar"
@@ -90,7 +90,7 @@ jobs:
             fi
           done
           
-      - name: "🏗️ Initialize Build Environment (初始化构建环境)"
+      - name: "Initialize Build Environment (初始化构建环境)"
         run: |
           echo "📂 Extracting build tools (解压构建工具)..."
           if ! sudo tar -xf SGSI-build-tool.tar; then
@@ -103,7 +103,7 @@ jobs:
           
           echo "✅ Environment initialization complete (环境初始化完成)"
           
-      - name: "🔧 Fix Toolchain Issues (修复工具链问题)"
+      - name: "Fix Toolchain Issues (修复工具链问题)"
         run: |
           cd SGSI-build-tool/10
           echo "🛠️ Fixing binary compatibility (修复二进制兼容性)..."
@@ -125,14 +125,14 @@ jobs:
           echo "✅ Essential binary tools linked (必需二进制工具链接完成)"
           cd ../..
           
-      - name: "🔒 Fix Directory Permissions (修复目录权限)"
+      - name: "Fix Directory Permissions (修复目录权限)"
         run: |
           echo "Fixing SGSI-build-tool directory permissions (修复SGSI-build-tool目录权限)..."
           sudo chown -R $(id -u):$(id -g) SGSI-build-tool
           sudo chmod -R 755 SGSI-build-tool
           echo "✅ Directory permissions fixed (目录权限已修复)"
           
-      - name: "💾 Download ROM File (下载ROM文件)"
+      - name: "Download ROM File (下载ROM文件)"
         run: |
           rom_path="SGSI-build-tool/10/tmp/${{ steps.config.outputs.rom_name }}"
           rom_url="${{ steps.config.outputs.rom_url }}"
@@ -180,7 +180,7 @@ jobs:
           echo -e "\n🎉 Download completed (下载完成)"
           echo "📦 File info (文件信息): $(sudo ls -lh "$rom_path")"
 
-      - name: "⚙️ Configure ROM Specific Settings (配置ROM特定设置)"
+      - name: "Configure ROM Specific Settings (配置ROM特定设置)"
         run: |
           echo "Starting ROM-specific configuration (开始配置ROM特定设置)..."
           
@@ -234,7 +234,7 @@ jobs:
             
           echo "ROM-specific configuration completed (ROM特定设置配置完成)"
           
-      - name: "🔧 Fix Script Syntax Errors (修复脚本语法错误)"
+      - name: "Fix Script Syntax Errors (修复脚本语法错误)"
         run: |
           cd SGSI-build-tool/10
           
@@ -249,7 +249,7 @@ jobs:
           fi
           cd ../..
           
-      - name: "📦 Prepare Build Files (准备构建文件)"
+      - name: "Prepare Build Files (准备构建文件)"
         run: |
           echo "Preparing build scripts and tools (准备构建脚本和工具)..."
           
@@ -277,7 +277,7 @@ jobs:
           
           echo "✅ Build files preparation completed (构建文件准备完成)"
           
-      - name: "🏭 Build SGSI Image (构建SGSI镜像)"
+      - name: "Build SGSI Image (构建SGSI镜像)"
         id: build_sgsi
         run: |
           cd SGSI-build-tool/10
@@ -354,7 +354,7 @@ jobs:
             echo "build_id=Unknown" >> $GITHUB_OUTPUT
           fi
            
-      - name: "📦 Package Output Files (打包输出文件)"
+      - name: "Package Output Files (打包输出文件)"
         run: |
           cd SGSI-build-tool/10
           
@@ -417,27 +417,33 @@ jobs:
           # Save upload directory path (保存上传目录路径)
           echo "UPLOAD_DIR=${GITHUB_WORKSPACE}/upload" >> $GITHUB_ENV
              
-      - name: "🏷️ Generate Release Tag and Time Info (生成发布标签和时间信息)"
+      - name: "Generate Release Tag and Time Info (生成发布标签和时间信息)"
         id: release_tag
         run: |
           # 生成唯一标签以避免冲突
-          current_date=$(date +"%Y%m%d")
-          timestamp=$(date +"%H%M%S")
+          current_date=$(TZ='Asia/Shanghai' date +"%Y%m%d")
+          timestamp=$(TZ='Asia/Shanghai' date +"%H%M%S")
           release_tag="${current_date}_${timestamp}"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           
-          # 获取当前构建时间（UTC时间）
-          build_time=$(TZ='UTC' date +"%Y-%m-%d %p/%P %I:%M")
+          # 获取当前构建时间（北京时间）
+          build_time=$(TZ='Asia/Shanghai' date +"%Y-%m-%d %p/%P %I:%M")
           # 将AM/PM转换为中文并添加斜杠和英文标识
-          build_time=${build_time/AM/上午/AM}
-          build_time=${build_time/PM/下午/PM}
+          if [[ $build_time == *"AM"* ]]; then
+            build_time=${build_time/AM/上午/AM}
+          elif [[ $build_time == *"PM"* ]]; then
+            build_time=${build_time/PM/下午/PM}
+          fi
+          # 添加北京时间标识
+          build_time="${build_time} [北京时间]"
           echo "build_time=$build_time" >> $GITHUB_OUTPUT
           
           # 处理从build.prop提取的原始构建日期
           original_build_date="${{ steps.build_sgsi.outputs.build_date }}"
           if [[ "$original_build_date" != "Unknown" ]]; then
-            # 不转换原始构建日期，也不添加时区信息
-            echo "formatted_build_date=$original_build_date" >> $GITHUB_OUTPUT
+            # 尝试重新格式化日期，将年份提前并添加空格
+            formatted_date=$(date -d "$original_build_date" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null || echo "$original_build_date")
+            echo "formatted_build_date=$formatted_date" >> $GITHUB_OUTPUT
           else
             echo "formatted_build_date=Unknown" >> $GITHUB_OUTPUT
           fi
@@ -456,7 +462,7 @@ jobs:
           echo "Build time: $build_time (构建时间: $build_time)"
           echo "ROM type: $rom_type (ROM 类型: $rom_type)"
              
-      - name: "🚀 Create Release with Unique Tag (使用唯一标签创建发布)"
+      - name: "Create Release with Unique Tag (使用唯一标签创建发布)"
         uses: softprops/action-gh-release@v1
         with:
           name: "Auto Build SGSI With XiaoxinTools AB-Android10 ${{ steps.release_tag.outputs.release_tag }}"
@@ -491,7 +497,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
              
-      - name: "✅ Completion Notification (完成通知)"
+      - name: "Completion Notification (完成通知)"
         if: success()
         run: |
           echo "🎉 Build completed! (构建完成!)"
