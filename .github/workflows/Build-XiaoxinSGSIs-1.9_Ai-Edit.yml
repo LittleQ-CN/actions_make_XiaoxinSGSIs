@@ -10,7 +10,7 @@ jobs:
       - name: "Checkout Code (检出代码)"
         uses: actions/checkout@v4
         
-      - name: "Check Config Status (检查配置文件 status)"
+      - name: "Check Config Status (检查配置文件)"
         run: |
           # Check sgsi.json config file (检查sgsi.json配置文件)
           if [[ ! -f "sgsi.json" ]]; then
@@ -352,7 +352,7 @@ jobs:
           fi
            
       # ===== 新增补丁打包步骤 =====
-      - name: "📦 Package Patches (打包补丁文件)"
+      - name: "Package Patches (打包补丁文件)"
         run: |
           echo "=== 开始打包补丁文件 ==="
           
