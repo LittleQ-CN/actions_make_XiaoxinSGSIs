@@ -1,4 +1,5 @@
-name: build_XiaoxinSGSIs_old_test
+
+name: build_XiaoxinSGSIs_old
 
 on:
   watch:
@@ -146,24 +147,48 @@ jobs:
           cd SGSI-build-tool/10
           sudo bash make.sh
           
+      # 修复目标目录不存在的问题
+      - name: Ensure SGSI directory exists
+        run: |
+          # Create the directory if it doesn't exist
+          sudo mkdir -p SGSI-build-tool/10/SGSI
+          echo "Verified SGSI directory exists"
+          
       - name: Package patch files
         run: |
           zip -r Patch1.zip Patch/Patch1/*
           zip -r Patch2.zip Patch/Patch2/*
           zip -r Patch3.zip Patch/Patch3/*
           sudo mv Patch1.zip Patch2.zip Patch3.zip SGSI-build-tool/10/SGSI/
+          echo "Patch files moved successfully"
 
       - name: Create final SGSI package
         run: |
           mkdir -p upload
           cd SGSI-build-tool/10/SGSI
+          
+          # Verify files exist before zipping
+          echo "Files in SGSI directory:"
+          ls -lh
+          
           zip -r ../../../${{ steps.var.outputs.pack_sgsi }} *
           cd ../../../
           
-          if [ $(stat -c%s "${{ steps.var.outputs.pack_sgsi }}") -gt 2097152000 ]; then
+          # Check if the file exists and has content
+          if [ ! -f "${{ steps.var.outputs.pack_sgsi }}" ]; then
+            echo "::error::SGSI package creation failed"
+            exit 1
+          fi
+          
+          file_size=$(stat -c%s "${{ steps.var.outputs.pack_sgsi }}")
+          echo "Package size: $(numfmt --to=iec $file_size)"
+          
+          if [ $file_size -gt 2097152000 ]; then
             echo "Splitting large package for GitHub upload"
+            mkdir -p upload
             split -b 1024m "${{ steps.var.outputs.pack_sgsi }}" "upload/${{ steps.var.outputs.pack_sgsi }}.part"
           else
+            mkdir -p upload
             mv "${{ steps.var.outputs.pack_sgsi }}" upload/
           fi
           echo "Generated artifacts:"
