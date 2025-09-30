@@ -13,7 +13,7 @@ jobs:
       - name: "Check Config Status (检查配置文件 status)"
         run: |
           # Check sgsi.json config file (检查sgsi.json配置文件)
-          if [[ ! -f "sg si.json" ]]; then
+          if [[ ! -f "sgsi.json" ]]; then
             echo "::error::❌ Missing sgsi.json config file (缺少sgsi.json配置文件)"
             exit 1
           fi
