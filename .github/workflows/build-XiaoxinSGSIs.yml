@@ -426,29 +426,41 @@ jobs:
           release_tag="${current_date}_${timestamp}"
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           
-          # 获取当前构建时间（北京时间）
-          build_time=$(TZ='Asia/Shanghai' date +"%Y-%m-%d %p/%P %I:%M")
-          # 将AM/PM转换为中文并添加斜杠和英文标识
-          if [[ $build_time == *"AM"* ]]; then
-            build_time=${build_time/AM/上午/AM}
-          elif [[ $build_time == *"PM"* ]]; then
-            build_time=${build_time/PM/下午/PM}
-          fi
+          # 获取当前构建时间（北京时间），格式：2025-09-30 下午 01:38 [北京时间]
+          build_time=$(TZ='Asia/Shanghai' date +"%Y-%m-%d %p %I:%M")
+          # 将AM/PM转换为中文（仅保留中文时段）
+          build_time=$(echo "$build_time" | sed -e 's/AM/上午/' -e 's/PM/下午/')
           # 添加北京时间标识
           build_time="${build_time} [北京时间]"
           echo "build_time=$build_time" >> $GITHUB_OUTPUT
           
-          # 处理从build.prop提取的原始构建日期
+          # 处理原构建日期（解决无空格格式问题）
           original_build_date="${{ steps.build_sgsi.outputs.build_date }}"
           if [[ "$original_build_date" != "Unknown" ]]; then
-            # 尝试重新格式化日期，将年份提前并添加空格
-            formatted_date=$(date -d "$original_build_date" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null || echo "$original_build_date")
+            # 尝试分割无空格的日期（如ThuJun1721:43:45CST2021 → Thu Jun 17 21:43:45 CST 2021）
+            parsed_date=$(echo "$original_build_date" | sed -E 's/([a-zA-Z]{3})([a-zA-Z]{3})([0-9]{2})([0-9]{2}:[0-9]{2}:[0-9]{2})([A-Z]{3})([0-9]{4})/\1 \2 \3 \4 \5 \6/' 2>/dev/null)
+            # 转换为清晰格式（2021-06-17 21:43:45 CST）
+            formatted_date=$(date -d "$parsed_date" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null || echo "$original_build_date")
             echo "formatted_build_date=$formatted_date" >> $GITHUB_OUTPUT
           else
             echo "formatted_build_date=Unknown" >> $GITHUB_OUTPUT
           fi
           
-          # 确定ROM类型
+          # 生成原包机型显示（处理Unknown情况）
+          model="${{ steps.build_sgsi.outputs.model }}"
+          device_codename="${{ steps.build_sgsi.outputs.device_codename }}"
+          if [[ "$model" == "Unknown" && "$device_codename" == "Unknown" ]]; then
+            source_device="Unknown"
+          elif [[ "$model" == "Unknown" ]]; then
+            source_device="$device_codename"
+          elif [[ "$device_codename" == "Unknown" ]]; then
+            source_device="$model"
+          else
+            source_device="$model [$device_codename]"
+          fi
+          echo "source_device=$source_device" >> $GITHUB_OUTPUT
+          
+          # 确定ROM类型（同之前逻辑）
           rom_type="Generic"
           if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
@@ -456,8 +468,9 @@ jobs:
           if [ "${{ steps.config.outputs.make_h2os }}" = "true" ]; then rom_type="H2OS"; fi
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
-          
           echo "rom_type=$rom_type" >> $GITHUB_OUTPUT
+          
+          # 输出调试信息
           echo "Generated release tag: $release_tag (生成的发布标签: $release_tag)"
           echo "Build time: $build_time (构建时间: $build_time)"
           echo "ROM type: $rom_type (ROM 类型: $rom_type)"
@@ -473,7 +486,7 @@ jobs:
             
             **构建时间 (Built at):** ${{ steps.release_tag.outputs.build_time }}
             
-            **原包机型 (Source Device):** ${{ steps.build_sgsi.outputs.model }} [${{ steps.build_sgsi.outputs.device_codename }}]
+            **原包机型 (Source Device):** ${{ steps.release_tag.outputs.source_device }}
             
             **ROM 类型 (ROM Type):** ${{ steps.release_tag.outputs.rom_type }}
             
@@ -491,9 +504,9 @@ jobs:
             
             ---
             
-            🔧 **注意 (Note):** 这是一个实验性构建 (This is an experimental build)
+            🔧 **注意 (Note):** 这是一个实验性构建 (This is an experimental build)，可能存在稳定性问题。
             
-            📝 **构建日志:** 可在GitHub Actions中查看完整构建日志
+            📝 **构建日志:** 可在GitHub Actions中查看完整构建日志（[点击查看](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})）
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
              
