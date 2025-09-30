@@ -8,10 +8,11 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
- 
+    steps:  # Missing steps keyword added
+      
       - name: Clean system environment
         run: |
-          sudo docker rmi $(docker images -q) || true
+          sudo docker rmi $(sudo docker images -q) || true
           sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
           sudo -E apt-get -y purge azure-cli ghc* zulu* hhvm llvm* firefox google* dotnet* powershell openjdk* mysql* php* || true
           sudo -E apt-get update
@@ -48,7 +49,7 @@ jobs:
           
           max_retries=5
           for i in $(seq 1 $max_retries); do
-            if curl -fL -o SGSI-build-tool.tar "$tool_url"; then
+            if sudo curl -fL -o SGSI-build-tool.tar "$tool_url"; then
               echo "Build tools download successful"
               break
             else
@@ -103,7 +104,7 @@ jobs:
             if command -v axel &> /dev/null; then
               echo "Using axel multi-threaded download"
               for i in $(seq 1 $max_retries); do
-                if sudo axel -n 10 -a -o "$rom_path" "${{ steps.el}}var.outputs.rom_url }}"; then
+                if sudo axel -n 10 -a -o "$rom_path" "${{ steps.var.outputs.rom_url }}"; then  # Fixed variable reference
                   echo "ROM download successful with axel"
                   download_success=true
                   break
@@ -138,7 +139,7 @@ jobs:
           fi
           
           # Verify file size
-          file_size=$(stat -c%s "$rom_path")
+          file_size=$(sudo stat -c%s "$rom_path")
           echo "Downloaded ROM size: $(numfmt --to=iec $file_size)"
       
       - name: Configure Super SGSI build
@@ -150,13 +151,13 @@ jobs:
         if: ${{ steps.var.outputs.make_miui == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          sudo mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
           
       - name: Configure Flyme SGSI build
         if: ${{ steps.var.outputs.make_flyme == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          sudo mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
           
       - name: Configure ColorOS SGSI build
         if: ${{ steps.var.outputs.make_coloros == 'true' }}
@@ -164,36 +165,34 @@ jobs:
           sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
           sudo rm -rf SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} 
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          sudo mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
           
       - name: Configure H2OS SGSI build
         if: ${{ steps.var.outputs.make_h2os == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          sudo mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
           
       - name: Configure SmartisanOS SGSI build
         if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          sudo mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
           
-      # 修复后的步骤：清除多余汉字"极"和冒号空格
       - name: Configure ZUI SGSI build
         if: ${{ steps.var.outputs.make_zui == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          sudo mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
            
-      # 同时修复了这步的路径中文问题
       - name: Generate SGSI images
         run: |
-          rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh \
+          sudo rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh \
                   SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid \
                   SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
           
-          mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
-          mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
+          sudo mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
+          sudo mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
           
           cd SGSI-build-tool/10
           sudo bash make.sh
@@ -210,7 +209,7 @@ jobs:
             patch_dir="Patch/Patch${patch_num}"
             if [ -d "$patch_dir" ]; then
               echo "Packaging $patch_dir ..."
-              zip -r Patch${patch_num}.zip "${patch_dir}"/*
+              sudo zip -r Patch${patch_num}.zip "${patch_dir}"/*
             else
               echo "Warning: $patch_dir not found! Skipping"
             fi
@@ -231,9 +230,9 @@ jobs:
           
           # Verify files exist before zipping
           echo "Files in SGSI directory:"
-          ls -lh
+          sudo ls -lh
           
-          if zip -r "../../../${{ steps.var.outputs.pack_sgsi}}" . -0; then
+          if sudo zip -r "../../../${{ steps.var.outputs.pack_sgsi}}" . -0; then
             echo "Package created successfully"
           else
             echo "::error::SGSI package creation failed"
