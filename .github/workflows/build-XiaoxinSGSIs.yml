@@ -10,7 +10,7 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: "Checkout Code (检出代码)"
+      - name: "📋 Checkout Code (检出代码)"
         uses: actions/checkout@v4
         
       - name: "📋 Check Config Status (检查配置文件状态)"
@@ -310,6 +310,10 @@ jobs:
             model=$(grep 'ro.product.model' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
             echo "📱 Extracted device model: $model (提取的设备型号: $model)"
             
+            # Device codename (机型代号)
+            device_codename=$(grep -E 'ro.product.(device|name|board|hardware)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            echo "🔤 Extracted device codename: $device_codename (提取的机型代号: $device_codename)"
+            
             # Security patch date (安全补丁日期)
             security_patch=$(grep 'ro.build.version.security_patch' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
             echo "🔒 Security patch date: $security_patch (安全补丁日期: $security_patch)"
@@ -333,6 +337,7 @@ jobs:
             
             # Output all extracted information (输出所有提取的信息)
             echo "model=$model" >> $GITHUB_OUTPUT
+            echo "device_codename=$device_codename" >> $GITHUB_OUTPUT
             echo "security_patch=$security_patch" >> $GITHUB_OUTPUT
             echo "android_version=$android_version" >> $GITHUB_OUTPUT
             echo "build_date=$build_date" >> $GITHUB_OUTPUT
@@ -341,6 +346,7 @@ jobs:
           else
             echo "⚠️ build.prop file not found (未找到build.prop文件)"
             echo "model=Unknown" >> $GITHUB_OUTPUT
+            echo "device_codename=Unknown" >> $GITHUB_OUTPUT
             echo "security_patch=Unknown" >> $GITHUB_OUTPUT
             echo "android_version=Unknown" >> $GITHUB_OUTPUT
             echo "build_date=Unknown" >> $GITHUB_OUTPUT
@@ -411,13 +417,32 @@ jobs:
           # Save upload directory path (保存上传目录路径)
           echo "UPLOAD_DIR=${GITHUB_WORKSPACE}/upload" >> $GITHUB_ENV
              
-      - name: "🏷️ Generate Release Tag (生成发布标签)"
+      - name: "🏷️ Generate Release Tag and Time Info (生成发布标签和时间信息)"
         id: release_tag
         run: |
+          # 生成唯一标签以避免冲突
           current_date=$(date +"%Y%m%d")
           timestamp=$(date +"%H%M%S")
+          release_tag="${current_date}_${timestamp}"
+          echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           
-          # Determine ROM type based on config (根据配置确定ROM类型)
+          # 获取当前构建时间（UTC时间）
+          build_time=$(TZ='UTC' date +"%Y-%m-%d %p/%P %I:%M")
+          # 将AM/PM转换为中文并添加斜杠和英文标识
+          build_time=${build_time/AM/上午/AM}
+          build_time=${build_time/PM/下午/PM}
+          echo "build_time=$build_time" >> $GITHUB_OUTPUT
+          
+          # 处理从build.prop提取的原始构建日期
+          original_build_date="${{ steps.build_sgsi.outputs.build_date }}"
+          if [[ "$original_build_date" != "Unknown" ]]; then
+            # 不转换原始构建日期，也不添加时区信息
+            echo "formatted_build_date=$original_build_date" >> $GITHUB_OUTPUT
+          else
+            echo "formatted_build_date=Unknown" >> $GITHUB_OUTPUT
+          fi
+          
+          # 确定ROM类型
           rom_type="Generic"
           if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
@@ -426,11 +451,9 @@ jobs:
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
-          # Generate unique tag to avoid conflicts (生成唯一标签以避免冲突)
-          release_tag="${current_date}_${timestamp}"
-          echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           echo "rom_type=$rom_type" >> $GITHUB_OUTPUT
           echo "Generated release tag: $release_tag (生成的发布标签: $release_tag)"
+          echo "Build time: $build_time (构建时间: $build_time)"
           echo "ROM type: $rom_type (ROM 类型: $rom_type)"
              
       - name: "🚀 Create Release with Unique Tag (使用唯一标签创建发布)"
@@ -442,17 +465,17 @@ jobs:
           body: |
             ## SGSI 构建信息 (Build Information)
             
-            **构建时间 (Built at):** ${{ steps.release_tag.outputs.release_tag }}
+            **构建时间 (Built at):** ${{ steps.release_tag.outputs.build_time }}
             
-            **ROM 类型 (ROM Type):** ${{ steps.release_tag.outputs.rom_type }} [自动识别]
+            **原包机型 (Source Device):** ${{ steps.build_sgsi.outputs.model }} [${{ steps.build_sgsi.outputs.device_codename }}]
             
-            **原包机型 (Source Device):** ${{ steps.build_sgsi.outputs.model }}
+            **ROM 类型 (ROM Type):** ${{ steps.release_tag.outputs.rom_type }}
             
             **Android 版本 (Android Version):** ${{ steps.build_sgsi.outputs.android_version }}
             
             **安全补丁日期 (Security Patch):** ${{ steps.build_sgsi.outputs.security_patch }}
             
-            **源构建日期 (Source Build Date):** ${{ steps.build_sgsi.outputs.build_date }}
+            **原构建日期 (Source Build Date):** ${{ steps.release_tag.outputs.formatted_build_date }}
             
             **ROM 版本 (ROM Version):** ${{ steps.build_sgsi.outputs.rom_version }}
             
