@@ -8,7 +8,9 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
-    steps:  # Missing steps keyword added
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
       
       - name: Clean system environment
         run: |
@@ -37,10 +39,11 @@ jobs:
       - name: Install download utilities
         run: |
           sudo apt-get update
-          sudo apt-get install -y aria2 axel
+          sudo apt-get install -y aria2 axel wget
           echo "Download utilities installed:"
           aria2c --version | head -1
           axel --version
+          wget --version | head -1
           
       - name: Download build tools
         run: |
@@ -49,7 +52,7 @@ jobs:
           
           max_retries=5
           for i in $(seq 1 $max_retries); do
-            if sudo curl -fL -o SGSI-build-tool.tar "$tool_url"; then
+            if curl -fL -o SGSI-build-tool.tar "$tool_url"; then
               echo "Build tools download successful"
               break
             else
@@ -64,81 +67,42 @@ jobs:
             
       - name: Initialize build environment
         run: |
+          # Extract and verify archive contents
           sudo tar -xf SGSI-build-tool.tar
-          sudo rm -rf SGSI-build-tool/10/setup.sh
-          sudo mv bin/setup.sh SGSI-build-tool/10/
-          cd SGSI-build-tool/10
-          sudo bash setup.sh
+          echo "Extracted archive contents:"
+          ls -lh
           
-      - name: Download ROM (multi-threaded)
-        run: |
-          echo "Downloading ROM: ${{ steps.var.outputs.rom_name }}"
-          rom_path="SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
-          rom_dir=$(dirname "$rom_path")
-          rom_file=$(basename "$rom_path")
-          
-          # Ensure download directory exists
-          sudo mkdir -p "$rom_dir"
-          
-          max_retries=3
-          download_success=false
-          
-          # Prefer aria2 if available
-          if command -v aria2c &> /dev/null; then
-            echo "Using aria2 multi-threaded download"
-            for i in $(seq 1 $max_retries); do
-              if sudo aria2c -x 8 -s 8 -k 1M "${{ steps.var.outputs.rom_url }}" -d "$rom_dir" -o "$rom_file"; then
-                echo "ROM download successful with aria2"
-                download_success=true
-                break
-              else
-                echo "Download attempt $i/$max_retries failed with aria2 - retrying..."
-                sudo rm -f "$rom_path" || true
-                sleep 15
-              fi
-            done
-          fi
-          
-          # If aria2 failed or not available, try axel
-          if [ "$download_success" = false ]; then
-            if command -v axel &> /dev/null; then
-              echo "Using axel multi-threaded download"
-              for i in $(seq 1 $max_retries); do
-                if sudo axel -n 10 -a -o "$rom_path" "${{ steps.var.outputs.rom_url }}"; then  # Fixed variable reference
-                  echo "ROM download successful with axel"
-                  download_success=true
-                  break
-                else
-                  echo "Download attempt $i/$max_retries failed with axel - retrying..."
-                  sudo rm -f "$rom_path" || true
-                  sleep 15
-                fi
-              done
-            fi
-          fi
-          
-          # Fallback to curl if both aria2 and axel failed
-          if [ "$download_success" = false ]; then
-            echo "Using curl as fallback download method"
-            for i in $(seq 1 $max_retries); do
-              if sudo curl -fL -o "$rom_path" "${{ steps.var.outputs.rom_url }}"; then
-                echo "ROM download successful with curl"
-                download_success=true
-                break
-              else
-                echo "Download attempt $i/$max_retries failed with curl - retrying..."
-                sudo rm -f "$rom_path" || true
-                sleep 15
-              fi
-            done
-          fi
-          
-          if [ ! -f "$rom_path" ]; then
-            echo "::error::ROM download failed after $max_retries attempts with all methods"
+          # Check if setup.sh exists in alternative locations
+          if [ -f "SGSI-build-tool/10/setup.sh" ]; then
+            echo "setup.sh already exists in SGSI-build-tool/10"
+          elif [ -f "bin/setup.sh" ]; then
+            echo "Moving bin/setup.sh to SGSI-build-tool/10/"
+            sudo mv bin/setup.sh SGSI-build-tool/10/
+          else
+            echo "::error::setup.sh not found in extracted archive!"
+            echo "Available files:"
+            find . -type f | grep setup.sh || echo "No setup.sh found"
             exit 1
           fi
           
-          # Verify file size
+          cd SGSI-build-tool/10
+          sudo bash setup.sh
+          
+      - name: Download ROM
+        run: |
+          echo "Downloading ROM: ${{ steps.var.outputs.rom_name }}"
+          rom_path="SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
+          sudo mkdir -p $(dirname "$rom_path")
+          
+          # Simple wget download as in the old workflow
+          sudo wget -c "${{ steps.var.outputs.rom_url }}" -O "$rom_path"
+          
+          # Verify download
+          if [ ! -f "$rom_path" ]; then
+            echo "::error::ROM download failed"
+            exit 1
+          fi
+          
           file_size=$(sudo stat -c%s "$rom_path")
           echo "Downloaded ROM size: $(numfmt --to=iec $file_size)"
       
@@ -151,13 +115,13 @@ jobs:
         if: ${{ steps.var.outputs.make_miui == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          sudo mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
+          [ -f "fix/MIUI.sh" ] && sudo mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
       - name: Configure Flyme SGSI build
         if: ${{ steps.var.outputs.make_flyme == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          sudo mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
+          [ -f "fix/Flyme.sh" ] && sudo mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
       - name: Configure ColorOS SGSI build
         if: ${{ steps.var.outputs.make_coloros == 'true' }}
@@ -165,34 +129,40 @@ jobs:
           sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
           sudo rm -rf SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} 
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          sudo mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
+          [ -f "fix/ColorOS.sh" ] && sudo mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
       - name: Configure H2OS SGSI build
         if: ${{ steps.var.outputs.make_h2os == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          sudo mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
+          [ -f "fix/H2OS.sh" ] && sudo mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
       - name: Configure SmartisanOS SGSI build
         if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          sudo mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
+          [ -f "fix/SmartisanOS.sh" ] && sudo mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
       - name: Configure ZUI SGSI build
         if: ${{ steps.var.outputs.make_zui == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          sudo mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh  # Added sudo
+          [ -f "fix/ZUI.sh" ] && sudo mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
            
       - name: Generate SGSI images
         run: |
-          sudo rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh \
-                  SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid \
-                  SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
+          # Clear existing scripts
+          sudo rm -f SGSI-build-tool/10/{SGSI.sh,makeimg.sh,dynamic_SGSI.sh,oppo.sh,make.sh}
+          sudo rm -f SGSI-build-tool/10/bin/{mke2fs,e2fsdroid}
           
-          sudo mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
-          sudo mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
+          # Move new scripts - check existence first
+          [ -f "make/makeimg.sh" ] && sudo mv make/makeimg.sh SGSI-build-tool/10/
+          [ -f "make/SGSI.sh" ] && sudo mv make/SGSI.sh SGSI-build-tool/10/
+          [ -f "make/dynamic_SGSI.sh" ] && sudo mv make/dynamic_SGSI.sh SGSI-build-tool/10/
+          [ -f "make/oppo.sh" ] && sudo mv make/oppo.sh SGSI-build-tool/10/
+          [ -f "make/make.sh" ] && sudo mv make/make.sh SGSI-build-tool/10/
+          [ -f "bin/mke2fs" ] && sudo mv bin/mke2fs SGSI-build-tool/10/bin/
+          [ -f "bin/e2fsdroid" ] && sudo mv bin/e2fsdroid SGSI-build-tool/10/bin/
           
           cd SGSI-build-tool/10
           sudo bash make.sh
@@ -209,12 +179,13 @@ jobs:
             patch_dir="Patch/Patch${patch_num}"
             if [ -d "$patch_dir" ]; then
               echo "Packaging $patch_dir ..."
-              sudo zip -r Patch${patch_num}.zip "${patch_dir}"/*
+              zip -r Patch${patch_num}.zip "$patch_dir"
             else
               echo "Warning: $patch_dir not found! Skipping"
             fi
           done
           
+          # Move patch files to SGSI directory
           for file in Patch{1,2,3}.zip; do
             if [ -f "$file" ]; then
               echo "Moving $file to SGSI directory"
@@ -228,38 +199,26 @@ jobs:
           mkdir -p upload
           cd SGSI-build-tool/10/SGSI
           
-          # Verify files exist before zipping
-          echo "Files in SGSI directory:"
-          sudo ls -lh
+          # Create zip package
+          sudo zip -r "../../../${{ steps.var.outputs.pack_sgsi}}" . -0
           
-          if sudo zip -r "../../../${{ steps.var.outputs.pack_sgsi}}" . -0; then
-            echo "Package created successfully"
-          else
-            echo "::error::SGSI package creation failed"
+          # Verify package creation
+          if [ ! -f "../../../${{ steps.var.outputs.pack_sgsi }}" ]; then
+            echo "::error::SGSI package not created!"
             exit 1
           fi
           
           cd ../../../
-          
-          # Check if the file exists and has content
-          if [ ! -f "${{ steps.var.outputs.pack_sgsi }}" ]; then
-            echo "::error::SGSI package not found after creation"
-            exit 1
-          fi
-          
           file_size=$(stat -c%s "${{ steps.var.outputs.pack_sgsi }}")
           echo "Package size: $(numfmt --to=iec $file_size)"
           
-          mkdir -p upload
-          if [ $file_size -gt 2097152000 ]; then  # Over 2GB
-            echo "Splitting large package using segment size of 1GB"
-            split -b 1000m -d "${{ steps.var.outputs.pack_sgsi }}" \
-                  "upload/${{ steps.var.outputs.pack_sgsi }}.part"
-            echo "Split files:"
-            ls -lh upload/
+          # Handle large files (>2GB) using split
+          if [ $file_size -gt 2147483648 ]; then
+            echo "Splitting large package (2GB+)"
+            split -b 1024m -d "${{ steps.var.outputs.pack_sgsi }}" \
+                  "upload/${{ steps.var.outputs.pack_sgsi }}."
           else
             mv "${{ steps.var.outputs.pack_sgsi }}" upload/
-            echo "Complete package: upload/${{ steps.var.outputs.pack_sgsi }}"
           fi
           
       - name: Upload artifacts to GitHub release
@@ -267,5 +226,5 @@ jobs:
         with:
           artifacts: 'upload/*'
           name: SGSI-build-result
-          tag: android10-sgsi-${{ github.run_id }}
+          tag: xiaoxinSGSI-ab-Android10-${{ github.run_number }}
           token: ${{ secrets.GITHUB_TOKEN }}
