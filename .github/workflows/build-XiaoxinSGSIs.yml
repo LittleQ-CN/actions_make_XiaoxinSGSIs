@@ -10,10 +10,10 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@main
         
-      - name: Clean Up
+      - name: Clean system environment
         run: |
           sudo docker rmi $(docker images -q) || true
           sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d
@@ -23,7 +23,7 @@ jobs:
           sudo -E apt-get clean 
           df -h
       
-      - name: Get variables
+      - name: Parse configuration variables
         id: var
         run: |
           echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUTPUT
@@ -37,6 +37,9 @@ jobs:
           echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_super=$(jq -r '.make_super' sgsi.json)" >> $GITHUB_OUTPUT
           
+      - name: Install axel download utility
+        run: sudo apt-get install -y axel
+          
       - name: Download build tools
         run: |
           tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
@@ -45,19 +48,19 @@ jobs:
           max_retries=5
           for i in $(seq 1 $max_retries); do
             if curl -fL -o SGSI-build-tool.tar "$tool_url"; then
-              echo "Download successful"
+              echo "Build tools download successful"
               break
             else
-              echo "Download failed, retrying ($i/$max_retries)..."
+              echo "Download attempt $i/$max_retries failed - retrying..."
               sleep 10
             fi
           done
           if [ ! -f "SGSI-build-tool.tar" ]; then
-            echo "::error::Build tools download failed"
+            echo "::error::Build tools download failed after $max_retries attempts"
             exit 1
           fi
             
-      - name: Initialization environment
+      - name: Initialize build environment
         run: |
           sudo tar -xf SGSI-build-tool.tar
           sudo rm -rf SGSI-build-tool/10/setup.sh
@@ -65,27 +68,51 @@ jobs:
           cd SGSI-build-tool/10
           sudo bash setup.sh
           
-      - name: Download Rom
-        run: sudo wget -c ${{ steps.var.outputs.rom_url }} -O SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
+      - name: Download ROM (multi-threaded)
+        run: |
+          echo "Downloading ROM: ${{ steps.var.outputs.rom_name }}"
+          rom_path="SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
+          
+          # Use axel for multi-threaded downloading with progress display
+          max_retries=3
+          for i in $(seq 1 $max_retries); do
+            if sudo axel -n 10 -a -o "$rom_path" "${{ steps.var.outputs.rom_url }}"; then
+              echo "ROM download successful"
+              break
+            else
+              echo "ROM download attempt $i/$max_retries failed - retrying..."
+              rm -f "$rom_path"
+              sleep 15
+            fi
+          done
+          
+          if [ ! -f "$rom_path" ]; then
+            echo "::error::ROM download failed after $max_retries attempts"
+            exit 1
+          fi
+          
+          # Verify file size
+          file_size=$(stat -c%s "$rom_path")
+          echo "Downloaded ROM size: $(numfmt --to=iec $file_size)"
       
-      - name: Build Super SGSI
+      - name: Configure Super SGSI build
         if: ${{ steps.var.outputs.make_super == 'true' }}
         run: |
           sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
       
-      - name: Make MIUI SGSI
+      - name: Configure MIUI SGSI build
         if: ${{ steps.var.outputs.make_miui == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
-      - name: Make Flyme SGSI
+      - name: Configure Flyme SGSI build
         if: ${{ steps.var.outputs.make_flyme == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
-      - name: Make ColorOS SGSI
+      - name: Configure ColorOS SGSI build
         if: ${{ steps.var.outputs.make_coloros == 'true' }}
         run: |
           sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
@@ -93,25 +120,25 @@ jobs:
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
-      - name: Make H2OS SGSI
+      - name: Configure H2OS SGSI build
         if: ${{ steps.var.outputs.make_h2os == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
-      - name: Make SmartisanOS SGSI
+      - name: Configure SmartisanOS SGSI build
         if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
-      - name: Make ZUI SGSI
+      - name: Configure ZUI SGSI build
         if: ${{ steps.var.outputs.make_zui == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
            
-      - name: Generate SGSI
+      - name: Generate SGSI images
         run: |
           rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
           mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
@@ -119,14 +146,14 @@ jobs:
           cd SGSI-build-tool/10
           sudo bash make.sh
           
-      - name: Zip Patch  
+      - name: Package patch files
         run: |
           zip -r Patch1.zip Patch/Patch1/*
           zip -r Patch2.zip Patch/Patch2/*
           zip -r Patch3.zip Patch/Patch3/*
           sudo mv Patch1.zip Patch2.zip Patch3.zip SGSI-build-tool/10/SGSI/
 
-      - name: Zip SGSI
+      - name: Create final SGSI package
         run: |
           mkdir -p upload
           cd SGSI-build-tool/10/SGSI
@@ -134,14 +161,15 @@ jobs:
           cd ../../../
           
           if [ $(stat -c%s "${{ steps.var.outputs.pack_sgsi }}") -gt 2097152000 ]; then
-            echo "Splitting package..."
-            split -b 1024m "${{ steps.var.outputs.pack_sgsi }}" "upload/${{ steps.var.outputs.pack_sgsi }}_part"
+            echo "Splitting large package for GitHub upload"
+            split -b 1024m "${{ steps.var.outputs.pack_sgsi }}" "upload/${{ steps.var.outputs.pack_sgsi }}.part"
           else
             mv "${{ steps.var.outputs.pack_sgsi }}" upload/
           fi
+          echo "Generated artifacts:"
           ls -lh upload/
           
-      - name: Upload SGSI to action-gh-release
+      - name: Upload artifacts to GitHub release
         uses: ncipollo/release-action@v1.8.6
         with:
           artifacts: 'upload/*'
