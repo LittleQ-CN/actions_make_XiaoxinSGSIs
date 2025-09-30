@@ -105,7 +105,7 @@ jobs:
             if command -v axel &> /dev/null; then
               echo "Using axel multi-threaded download"
               for i in $(seq 1 $max_retries); do
-                if sudo axel -n 10 -a -o "$rom_path" "${{ steps.极极el}}var.outputs.rom_url }}"; then
+                if sudo axel -n 10 -a -o "$rom_path" "${{steps.el}}var.outputs.rom_url }}"; then
                   echo "ROM download successful with axel"
                   download_success=true
                   break
