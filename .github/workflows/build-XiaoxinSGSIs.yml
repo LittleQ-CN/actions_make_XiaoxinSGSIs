@@ -33,7 +33,7 @@ jobs:
           echo "🗑️ Starting full cleanup (启动全面清理)..."
           sudo apt-get autoremove -y --purge
           sudo apt-get clean
-          sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /etc/apt/sources.list.d || true
+          sudo rm -rf /usr/share.docker /etc/mysql /etc/php /etc/apt/sources.list.d || true
           echo "✅ Cleanup complete! Disk space (清理完成！磁盘空间):"
           df -h
        
@@ -119,7 +119,7 @@ jobs:
               echo "✅ Linked $tool from $tool_location"
             else
               echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
-            end
+            fi
           done
           
           echo "✅ Essential binary tools linked (必需二进制工具链接完成)"
@@ -303,6 +303,9 @@ jobs:
           
           # Extract detailed device information from build.prop (从build.prop提取详细设备信息)
           if [[ -f "./out/system/system/build.prop" ]]; then
+            # 确保文件可读
+            sudo chmod 644 ./out/system/system/build.prop
+            
             # Device model (设备型号)
             model=$(grep 'ro.product.model' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
             echo "📱 Extracted device model: $model (提取的设备型号: $model)"
@@ -464,16 +467,6 @@ jobs:
             📝 **构建日志:** 可在GitHub Actions中查看完整构建日志
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-             
-      - name: "✅ Check Upload Status (检查上传状态)"
-        run: |
-          if [[ -n "${{ github.event.release }}" ]] && [[ -n "${{ github.event.release.upload_url }}" ]]; then
-            echo "🎉 Release created successfully! (发布创建成功！)"
-          else
-            echo "::warning::⚠️ Release creation may have issues (发布创建可能有问题)"
-            echo "Upload artifacts directory contents (上传产物目录内容):"
-            ls -la "${{ env.UPLOAD_DIR }}" || true
-          fi
              
       - name: "✅ Completion Notification (完成通知)"
         if: success()
