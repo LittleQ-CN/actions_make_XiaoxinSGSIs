@@ -27,21 +27,31 @@ jobs:
       - name: Get build variables
         id: var
         run: |
-          echo "rom_url=$(jq -r '.rom_url' sgsi.json)" >> $GITHUB_OUT.json)" >> $GITHUB_OUTPUT
-          echo "rom_name=$(jq -r '.rom_name' sgsi.json)" >> $GITHUB_OUTPUT
-          echo "pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)" >> $GITHUB_OUTPUT
-          echo "make_miui=$(jq -r '.make_miui' sgsi.json)" >> $GITHUB_OUTPUT
-          echo "make_flyme=$(jq -r '.make_flyme' sgsi.json)" >> $GITHUB_OUTPUT
-          echo "make_coloros=$(jq -r '.make_coloros' sgsi.json)" >> $GITHUB_OUTPUT
-          echo "make_h2os=$(jq -r '.make_h2os' sgsi.json)" >> $GITHUB_OUTPUT
- >> $GITHUB_OUTPUT
-          echo "make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)" >> $GITHUB_OUTPUT
-          echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
-          echo "make_super=$(jq -r '.make_super' sgsi.json)" >> $GITHUB_OUTPUT
+          rom_url=$(jq -r '.rom_url' sgsi.json)
+          rom_name=$(jq -r '.rom_name' sgsi.json)
+          pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)
+          make_miui=$(jq -r '.make_miui' sgsi.json)
+          make_flyme=$(jq -r '.make_flyme' sgsi.json)
+          make_coloros=$(jq -r '.make_coloros' sgsi.json)
+          make_h2os=$(jq -r '.make_h2os' sgsi.json)
+          make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)
+          make_zui=$(jq -r '.make_zui' sgsi.json)
+          make_super=$(jq -r '.make_super' sgsi.json)
+          
+          echo "rom_url=$rom_url" >> $GITHUB_OUTPUT
+          echo "rom_name=$rom_name" >> $GITHUB_OUTPUT
+          echo "pack_sgsi=$pack_sgsi" >> $GITHUB_OUTPUT
+          echo "make_miui=$make_miui" >> $GITHUB_OUTPUT
+          echo "make_flyme=$make_flyme" >> $GITHUB_OUTPUT
+          echo "make_coloros=$make_coloros" >> $GITHUB_OUTPUT
+          echo "make_h2os=$make_h2os" >> $GITHUB_OUTPUT
+          echo "make_smartisanos=$make_smartisanos" >> $GITHUB_OUTPUT
+          echo "make_zui=$make_zui" >> $GITHUB_OUTPUT
+          echo "make_super=$make_super" >> $GITHUB_OUTPUT
            
       - name: Download build tools
         run: |
-          tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v2.1/SGSI-build-tool.tar"
+          tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
           echo "Downloading build tools: $tool_url"
           
           max_retries=5
@@ -54,7 +64,6 @@ jobs:
               sleep 10
             fi
           done
-          if [ ! -f done
           if [ ! -f "SGSI-build-tool.tar" ]; then
             echo "::error::Build tools download failed"
             exit 1
@@ -63,13 +72,14 @@ jobs:
       - name: Initialize environment
         run: |
           sudo tar -xf SGSI-build-tool.tar
-          sudo rm -rf SGSI-build-tool/10/setup-build-tool/10/setup.sh || true
+          sudo rm -rf SGSI-build-tool/10/setup.sh || true
           sudo mv bin/setup.sh SGSI-build-tool/10/
           cd SGSI-build-tool/10
           sudo bash setup.sh
            
       - name: Download ROM
-        run: sudo wget -c ${{ steps.var.outputs.rom_url }} -O SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
+        run: |
+          sudo wget -c ${{ steps.var.outputs.rom_url }} -O SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
        
       - name: Configure Super SGSI build
         if: ${{ steps.var.outputs.make_super == 'true' }}
@@ -80,7 +90,7 @@ jobs:
         if: ${{ steps.var.outputs.make_miui == 'true' }}
         run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh || true
-          mv fix/MIUI.sh SGSI-build-tool/10/fixbug/f-tool/10/fixbug/fixbug.sh
+          mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
            
       - name: Configure Flyme SGSI build
         if: ${{ steps.var.outputs.make_flyme == 'true' }}
@@ -90,7 +100,6 @@ jobs:
            
       - name: Configure ColorOS SGSI build
         if: ${{ steps.var.outputs.make_coloros == 'true' }}
-        runos == 'true' }}
         run: |
           sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}
           sudo rm -rf SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }} SGSI-build-tool/10/fixbug/fixbug.sh || true
@@ -111,8 +120,6 @@ jobs:
       - name: Configure ZUI SGSI build
         if: ${{ steps.var.outputs.make_zui == 'true' }}
         run: |
-          sudo rm }}
-        run: |
           sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh || true
           mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
             
@@ -131,30 +138,29 @@ jobs:
           zip -r Patch3.zip Patch/Patch3/*
           sudo mv Patch1.zip Patch2.zip Patch3.zip SGSI-build-tool/10/SGSI/
 
-      -/10/SGSI/
-
       - name: Package SGSI files
         run: |
           mkdir -p upload
-          cd SGSI-build-tool/10/SGSI-build-tool/10/SGSI
+          cd SGSI-build-tool/10/SGSI
           zip -r ${{ steps.var.outputs.pack_sgsi }} *
           cd ../../..
-          mv SGSI-build-tool/10/SGSI/${{ steps.var.outputs.pack_sgsi }} .
-          file_size=$(du -sb ${{ steps.var.outputs.pack_sgsi }} | awk '{print $1}')
+          mv ${{ steps.var.outputs.pack_sgsi }} upload/
+          
+          file_size=$(du -sb upload/${{ steps.var.outputs.pack_sgsi }} | awk '{print $1}')
           if [ $file_size -gt 2097152000 ]; then
             echo "Splitting large file into parts..."
+            cd upload
             mkdir -p parts
             split -b 1024m ${{ steps.var.outputs.pack_sgsi }} parts/${{ steps.var.outputs.pack_sgsi }}.
-            mv parts/* upload/
-          else
-            mv ${{ steps.var.outputs.pack_sgsi }} upload/
+            rm ${{ steps.var.outputs.pack_sgsi }}
+            mv parts/* .
+            rm -rf parts
+            cd ..
           fi
           ls -lh upload
              
       - name: Upload SGSI to release
         uses: ncipollo/release-action@v1.8.6
-        with:
-          artifacts: upload
         with:
           artifacts: upload/*
           name: xiaoxinSGSI-ab-Android10-unpack
