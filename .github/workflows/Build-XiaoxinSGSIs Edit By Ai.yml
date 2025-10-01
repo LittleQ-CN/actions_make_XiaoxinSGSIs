@@ -1,3 +1,4 @@
+
 name: build_XiaoxinSGSIs_test
 
 on:
@@ -75,81 +76,128 @@ jobs:
        
       - name: Build Super SGSI
         if: ${{ steps.var.outputs.make_super == 'true' }}
-        run: sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
+        run: |
+          cd SGSI-build-tool/10
+          sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
        
       - name: Make MIUI SGSI
         if: ${{ steps.var.outputs.make_miui == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          cd SGSI-build-tool/10
+          sudo rm -rf fixbug/fixbug.sh
+          cp ../../fix/MIUI.sh fixbug/fixbug.sh
            
       - name: Make Flyme SGSI
         if: ${{ steps.var.outputs.make_flyme == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          cd SGSI-build-tool/10
+          sudo rm -rf fixbug/fixbug.sh
+          cp ../../fix/Flyme.sh fixbug/fixbug.sh
            
       - name: Make ColorOS SGSI
         if: ${{ steps.var.outputs.make_coloros == 'true' }}
         run: |
-          sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
-          sudo rm -rf "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}" SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          cd SGSI-build-tool/10
+          sudo python3 oppo_ozip/ozipdecrypt.py "tmp/${{ steps.var.outputs.rom_name }}"
+          sudo rm -rf "tmp/${{ steps.var.outputs.rom_name }}" fixbug/fixbug.sh
+          cp ../../fix/ColorOS.sh fixbug/fixbug.sh
            
       - name: Make H2OS SGSI
         if: ${{ steps.var.outputs.make_h2os == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          cd SGSI-build-tool/10
+          sudo rm -rf fixbug/fixbug.sh
+          cp ../../fix/H2OS.sh fixbug/fixbug.sh
            
       - name: Make SmartisanOS SGSI
         if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          cd SGSI-build-tool/10
+          sudo rm -rf fixbug/fixbug.sh
+          cp ../../fix/SmartisanOS.sh fixbug/fixbug.sh
            
       - name: Make ZUI SGSI
         if: ${{ steps.var.outputs.make_zui == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
-          mv fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+          cd SGSI-build-tool/10
+          sudo rm -rf fixbug/fixbug.sh
+          cp ../../fix/ZUI.sh fixbug/fixbug.sh
             
       - name: Generate SGSI
         run: |
-          rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
-          mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
-          mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
           cd SGSI-build-tool/10
+          
+          # 修复关键文件缺失问题
+          cp -r ../../bin/. bin/
+          cp -r ../../make/. .
+          cp -r ../../tools/new_fs/. new_fs/
+          cp -r ../../tools/add_lib/. add_lib/
+          cp -r ../../tools/add_lib64/. add_lib64/
+          cp -r ../../tools/mergefs/. mergefs/
+          cp -r ../../tools/cp_phh/. cp_phh/
+          cp -r ../../tools/phh_lib64/. phh_lib64/
+          cp -r ../../tools/phh_lib/. phh_lib/
+          
+          # 设置执行权限
+          chmod +x SGSI.sh makeimg.sh dynamic_SGSI.sh oppo.sh make.sh
+          chmod +x bin/mke2fs bin/e2fsdroid
+          chmod +x new_fs/*.sh
+          chmod +x add_lib/*.sh
+          chmod +x add_lib64/*.sh
+          chmod +x mergefs/*.sh
+          chmod +x phh_lib64/*.sh
+          
           sudo bash make.sh
 
       - name: Make Patch Module
         run: |
           cd SGSI-build-tool/10
-          zip -r Patchmod.zip out/vendor/app/* out/vendor/bin/* out/vendor/etc/* out/vendor/lib/* out/vendor/lib64/* out/vendor/overlay/*
-          sudo mv Patchmod.zip SGSI/
+          
+          # 确保out目录存在
+          if [ -d "out/vendor" ]; then
+            zip -r Patchmod.zip out/vendor/app/* out/vendor/bin/* out/vendor/etc/* out/vendor/lib/* out/vendor/lib64/* out/vendor/overlay/*
+            mv Patchmod.zip SGSI/
+          else
+            echo "::warning::out/vendor directory not found (out/vendor目录不存在)"
+          fi
            
       - name: Zip Patch  
         run: |
-          cd Patch
-          zip -r Patch1.zip Patch1/*
-          zip -r Patch2.zip Patch2/*
-          zip -r Patch3.zip Patch3/*
-          sudo mv Patch1.zip Patch2.zip Patch3.zip ../SGSI-build-tool/10/SGSI/
+          cd SGSI-build-tool/10
+          
+          # 确保Patch目录存在
+          if [ -d "../../Patch" ]; then
+            cd ../../Patch
+            zip -r Patch1.zip Patch1/*
+            zip -r Patch2.zip Patch2/*
+            zip -r Patch3.zip Patch3/*
+            mv Patch1.zip Patch2.zip Patch3.zip ../SGSI-build-tool/10/SGSI/
+          else
+            echo "::warning::Patch directory not found (Patch目录不存在)"
+          fi
 
       - name: 7z SGSI
         run: |
           cd SGSI-build-tool/10
-          7za a -t7z -r "${{ steps.var.outputs.pack_sgsi }}" SGSI/*
+          
+          # 确保SGSI目录存在
+          if [ -d "SGSI" ]; then
+            7za a -t7z -r "${{ steps.var.outputs.pack_sgsi }}" SGSI/*
+          else
+            echo "::error::SGSI directory not found (SGSI目录不存在)"
+            exit 1
+          fi
 
       - name: Upload SGSI to WeTransfer
         if: ${{ steps.var.outputs.upload_transfer == 'true' }}
         run: |
+          cd SGSI-build-tool/10
           curl -sL https://git.io/file-transfer | sh
-          ./transfer wet "SGSI-build-tool/10/${{ steps.var.outputs.pack_sgsi }}"
+          ./transfer wet "${{ steps.var.outputs.pack_sgsi }}"
           
       - name: Upload SGSI to Artifact
         if: ${{ steps.var.outputs.upload_artifact == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v2
         with: 
           name: XiaoxinSGSIs
           path: "SGSI-build-tool/10/${{ steps.var.outputs.pack_sgsi }}"
