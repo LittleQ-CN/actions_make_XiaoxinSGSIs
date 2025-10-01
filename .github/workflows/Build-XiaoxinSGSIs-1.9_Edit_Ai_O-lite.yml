@@ -105,7 +105,7 @@ jobs:
             if command -v axel &> /dev/null; then
               echo "Using axel multi-threaded download"
               for i in $(seq 1 $max_retries); do
-                if sudo axel -n 10 -a -o "$rom_path" "${{steps.el}}var.outputs.rom_url }}"; then
+                if sudo axel -n 10 -a -o "$rom_path" "${{ steps.var.outputs.rom_url }}"; then
                   echo "ROM download successful with axel"
                   download_success=true
                   break
@@ -188,21 +188,11 @@ jobs:
            
       - name: Generate SGSI images
         run: |
-          rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh \
-                  SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid \
-                  SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
-          
+          rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/bin/mke2fs SGSI-build-tool/10/bin/e2fsdroid SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh
           mv make/makeimg.sh make/SGSI.sh make/dynamic_SGSI.sh make/oppo.sh make/make.sh SGSI-build-tool/10/
           mv bin/mke2fs bin/e2fsdroid SGSI-build-tool/10/bin/
-          
           cd SGSI-build-tool/10
           sudo bash make.sh
-          echo "SGSI image generation completed successfully"
-          
-      - name: Ensure SGSI directory exists
-        run: |
-          sudo mkdir -p SGSI-build-tool/10/SGSI
-          echo "SGSI output directory verified"
           
       - name: Package patch files
         run: |
@@ -224,6 +214,7 @@ jobs:
           done
           echo "Patch files moved successfully"
 
+      # 优化后的打包步骤 - 使用您提供的逻辑
       - name: Create final SGSI package
         run: |
           mkdir -p upload
@@ -233,40 +224,38 @@ jobs:
           echo "Files in SGSI directory:"
           ls -lh
           
-          if zip -r "../../../${{ steps.var.outputs.pack_sgsi}}" . -0; then
-            echo "Package created successfully"
-          else
-            echo "::error::SGSI package creation failed"
-            exit 1
-          fi
-          
+          # Return to root directory
           cd ../../../
           
-          # Check if the file exists and has content
-          if [ ! -f "${{ steps.var.outputs.pack_sgsi }}" ]; then
-            echo "::error::SGSI package not found after creation"
-            exit 1
-          fi
+          # 使用您提供的打包逻辑
+          zip -r "${{ steps.var.outputs.pack_sgsi }}" SGSI-build-tool/10/SGSI/*
           
-          file_size=$(stat -c%s "${{ steps.var.outputs.pack_sgsi }}")
+          # 获取文件大小（字节）
+          file_size=$(du -sb "${{ steps.var.outputs.pack_sgsi }}" | awk '{print $1}')
+          max_size=2097152000  # 2GB in bytes
+          
           echo "Package size: $(numfmt --to=iec $file_size)"
           
-          mkdir -p upload
-          if [ $file_size -gt 2097152000 ]; then  # Over 2GB
-            echo "Splitting large package using segment size of 1GB"
-            split -b 1000m -d "${{ steps.var.outputs.pack_sgsi }}" \
-                  "upload/${{ steps.var.outputs.pack_sgsi }}.part"
-            echo "Split files:"
-            ls -lh upload/
+          if [ $file_size -gt $max_size ]; then
+            echo "Package exceeds 2GB, splitting into 1024MB segments..."
+            mkdir -p upload
+            
+            # Split the package using your method
+            tar -cpzf - "${{ steps.var.outputs.pack_sgsi }}" | split -d -b 1024m - "upload/${{ steps.var.outputs.pack_sgsi }}."
+            echo "Split packaging completed"
           else
+            echo "Moving single package to upload directory"
+            mkdir -p upload
             mv "${{ steps.var.outputs.pack_sgsi }}" upload/
-            echo "Complete package: upload/${{ steps.var.outputs.pack_sgsi }}"
           fi
+          
+          echo "Final artifacts in upload/:"
+          ls -lh upload/
           
       - name: Upload artifacts to GitHub release
         uses: ncipollo/release-action@v1.8.6
         with:
           artifacts: 'upload/*'
-          name: SGSI-build-result
+          name: SGSI-build-result-1.9
           tag: android10-sgsi-${{ github.run_id }}
           token: ${{ secrets.GITHUB_TOKEN }}
