@@ -41,7 +41,7 @@ jobs:
           
       - name: Download XiaoxinSGSIs Tools
         run: |
-          tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v2.0/SGSI-build-tool.tar"
+          tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v2.1/SGSI-build-tool.tar"
           filename="SGSI-build-tool.tar"
           
           echo "🔧 Starting build tools download (开始下载构建工具)..."
