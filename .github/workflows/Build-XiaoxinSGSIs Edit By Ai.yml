@@ -29,7 +29,7 @@ jobs:
           echo "pack_sgsi=$(jq -r '.pack_sgsi' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_miui=$(jq -r '.make_miui' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_flyme=$(jq -r '.make_flyme' sgsi.json)" >> $GITHUB_OUTPUT
-          echo极 "make_coloros=$(jq -r '.make_coloros' sgsi.json)" >> $GITHUB_OUTPUT
+          echo "make_coloros=$(jq -r '.make_coloros' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_h2os=$(jq -r '.make_h2os' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
@@ -157,7 +157,7 @@ jobs:
       - name: Configure Flyme SGSI build
         if: ${{ steps.var.outputs.make_flyme == 'true' }}
         run: |
-          sudo rm -rf SGSI-build-tool/10/fixbug/f极ixbug.sh
+          sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
           mv fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
           
       - name: Configure ColorOS SGSI build
@@ -239,7 +239,7 @@ jobs:
           if [ $file_size -gt $max_size ]; then
             echo "Package exceeds 2GB, splitting into 1024MB segments..."
             mkdir -p upload
-            极
+            
             # Split the package using your method
             tar -cpzf - "${{ steps.var.outputs.pack_sgsi }}" | split -d -b 1024m - "upload/${{ steps.var.outputs.pack_sgsi }}."
             echo "Split packaging completed"
