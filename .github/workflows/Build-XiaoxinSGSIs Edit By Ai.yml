@@ -45,7 +45,7 @@ jobs:
           
       - name: Download build tools
         run: |
-          tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v2.1/SGSI-build-tool.tar"
+          tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v2.0/SGSI-build-tool.tar"
           echo "Downloading build tools: $tool_url"
           
           max_retries=5
