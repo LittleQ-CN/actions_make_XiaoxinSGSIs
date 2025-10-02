@@ -151,12 +151,11 @@ jobs:
             echo "✅ $rom_type configuration applied (已应用$rom_type配置)"
           fi
           
-          # Fix script syntax errors (修复脚本语法错误)
+          # Fix script syntax errors and add non-interactive mode (修复脚本语法错误并添加非交互模式)
           cd SGSI-build-tool/10
           echo "Checking and fixing SGSI.sh script errors (检查并修复SGSI.sh脚本错误)..."
           if [[ -f "SGSI.sh" ]]; then
             # 修复第9行和第12行的变量引用问题
-            # 将 [ $dynamic = 'y' ] 修复为 [ "$dynamic" = 'y' ]
             sudo sed -i '9s/\[ \$dynamic = /[ "$dynamic" = /' SGSI.sh
             sudo sed -i '12s/\[ \$dynamic = /[ "$dynamic" = /' SGSI.sh
             
@@ -164,12 +163,29 @@ jobs:
             sudo sed -i 's/\[ \$light = /[ "$light" = /g' SGSI.sh
             sudo sed -i 's/\[ \$mane = /[ "$mane" = /g' SGSI.sh
             
-            echo "✅ Script syntax errors fixed (已修复脚本语法错误)"
+            # 为非交互模式设置默认值
+            # 根据 make_super 参数设置动态分区选项
+            if [[ "${{ steps.config.outputs.make_super }}" = "true" ]]; then
+              sudo sed -i '4s/read -p "是否制造动态分区SGSI(y:是\/n:不是): " dynamic/dynamic="y"/' SGSI.sh
+              echo "✅ Dynamic SGSI enabled (动态SGSI已启用)"
+            else
+              sudo sed -i '4s/read -p "是否制造动态分区SGSI(y:是\/n:不是): " dynamic/dynamic="n"/' SGSI.sh
+              echo "✅ Dynamic SGSI disabled (动态SGSI已禁用)"
+            fi
+            
+            # 设置其他交互选项的默认值
+            sudo sed -i 's/read -p "按任意键开始处理" var/var="continue"/' SGSI.sh
+            sudo sed -i 's/read -p "是否启用亮度修复(y\/n): " light/light="y"/' SGSI.sh
+            sudo sed -i 's/read -p "是否修复启用bug修复(y\/n): " mane/mane="y"/' SGSI.sh
+            
+            echo "✅ Script syntax errors fixed and non-interactive mode enabled (已修复脚本语法错误并启用非交互模式)"
             
             # 显示修复后的相关行
-            echo "=== Fixed lines 9 and 12 (修复后的第9行和第12行) ==="
-            sed -n '9p;12p' SGSI.sh
-            echo "=================================================="
+            echo "=== Fixed lines (修复后的关键行) ==="
+            sed -n '4p;9p;12p' SGSI.sh
+            grep -n "light=" SGSI.sh | head -1
+            grep -n "mane=" SGSI.sh | head -1
+            echo "=================================="
           else
             echo "::warning::⚠️ SGSI.sh script not found (未找到SGSI.sh脚本)"
           fi
@@ -197,7 +213,7 @@ jobs:
             echo "=============================="
           } > build_monitor.log
           
-          # Build with monitoring (带监控的构建)
+          # Build with monitoring and error handling (带监控和错误处理的构建)
           timeout 75m bash -c '
             # Disk space monitoring (磁盘空间监控)
             while true; do
@@ -206,36 +222,64 @@ jobs:
             done &
             disk_monitor_pid=$!
             
-            if ! sudo bash make.sh 2>&1 | tee -a make.log build_monitor.log; then
-              echo "::error::❌ Build failed! (构建失败！)"
-              kill $disk_monitor_pid 2>/dev/null || true
-              echo "=== Last 100 lines of build log (构建日志最后100行) ==="
-              tail -100 make.log
-              exit 1
-            fi
+            set +e
+            build_output=$(sudo bash make.sh 2>&1)
+            build_exit_code=$?
+            set -e
+            
+            # 记录构建输出
+            echo "$build_output" | tee -a make.log build_monitor.log
             
             kill $disk_monitor_pid 2>/dev/null || true
+            
+            if [ $build_exit_code -ne 0 ]; then
+              echo "::error::❌ Build failed with exit code $build_exit_code! (构建失败，退出码: $build_exit_code)"
+              echo "=== Build output with errors (构建输出和错误) ==="
+              echo "$build_output"
+              echo "=============================================="
+              exit $build_exit_code
+            fi
+            
+            # 检查是否生成了 out 目录
+            if [[ ! -d "out" ]]; then
+              echo "::error::❌ Build completed but out directory not found! (构建完成但未找到out目录)"
+              echo "=== Last 50 lines of build log (构建日志最后50行) ==="
+              tail -50 make.log
+              echo "=============================================="
+              exit 1
+            fi
           ' || exit $?
           
-          echo "🎉 SGSI build completed (SGSI构建完成)"
+          echo "🎉 SGSI build completed successfully (SGSI构建成功完成)"
           
           # Fix permissions and extract info (修复权限并提取信息)
-          sudo chown -R $(id -u):$(id -g) out/
-          sudo chmod -R 755 out/
-          
-          if [[ -f "./out/system/system/build.prop" ]]; then
-            sudo chmod 644 ./out/system/system/build.prop
-            {
-              echo "model=$(grep 'ro.product.model' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
-              echo "device_codename=$(grep -E 'ro.product.(device|name|board|hardware)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
-              echo "security_patch=$(grep 'ro.build.version.security_patch' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
-              echo "android_version=$(grep 'ro.build.version.release' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
-              echo "build_date=$(grep 'ro.build.date' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
-              echo "rom_version=$(grep -E 'ro.(build|system|product).(version|display).(incremental|id|name)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
-              echo "build_id=$(grep 'ro.build.id' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
-            } >> $GITHUB_OUTPUT
+          if [[ -d "out" ]]; then
+            sudo chown -R $(id -u):$(id -g) out/
+            sudo chmod -R 755 out/
+            
+            if [[ -f "./out/system/system/build.prop" ]]; then
+              sudo chmod 644 ./out/system/system/build.prop
+              {
+                echo "model=$(grep 'ro.product.model' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
+                echo "device_codename=$(grep -E 'ro.product.(device|name|board|hardware)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
+                echo "security_patch=$(grep 'ro.build.version.security_patch' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
+                echo "android_version=$(grep 'ro.build.version.release' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
+                echo "build_date=$(grep 'ro.build.date' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
+                echo "rom_version=$(grep -E 'ro.(build|system|product).(version|display).(incremental|id|name)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
+                echo "build_id=$(grep 'ro.build.id' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")"
+              } >> $GITHUB_OUTPUT
+            else
+              echo "⚠️ build.prop not found in out directory (在out目录中未找到build.prop文件)"
+              echo "model=Unknown" >> $GITHUB_OUTPUT
+              echo "device_codename=Unknown" >> $GITHUB_OUTPUT
+              echo "security_patch=Unknown" >> $GITHUB_OUTPUT
+              echo "android_version=Unknown" >> $GITHUB_OUTPUT
+              echo "build_date=Unknown" >> $GITHUB_OUTPUT
+              echo "rom_version=Unknown" >> $GITHUB_OUTPUT
+              echo "build_id=Unknown" >> $GITHUB_OUTPUT
+            fi
           else
-            echo "⚠️ build.prop not found (未找到build.prop文件)"
+            echo "::error::❌ Out directory not found after build (构建后未找到out目录)"
             echo "model=Unknown" >> $GITHUB_OUTPUT
             echo "device_codename=Unknown" >> $GITHUB_OUTPUT
             echo "security_patch=Unknown" >> $GITHUB_OUTPUT
@@ -243,6 +287,7 @@ jobs:
             echo "build_date=Unknown" >> $GITHUB_OUTPUT
             echo "rom_version=Unknown" >> $GITHUB_OUTPUT
             echo "build_id=Unknown" >> $GITHUB_OUTPUT
+            exit 1
           fi
 
       - name: "Package Output (打包输出)"
