@@ -370,7 +370,7 @@ jobs:
           if [[ "$original_build_date" != "Unknown" ]]; then
             parsed_date=$(echo "$original_build_date" | sed -E 's/([a-zA-Z]{3})([a-zA-Z]{3})([0-9]{2})([0-9]{2}:[0-9]{2}:[0-9]{2})([A-Z]{3})([0-9]{4})/\1 \2 \3 \4 \5 \6/' 2>/dev/null)
             formatted_date=$(date -d "$parsed_date" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null || echo "$original_build_date")
-            echo "formatted_build_date=$formatted_date" >> $ITHUB_OUTPUT
+            echo "formatted_build_date=$formatted_date" >> $GITHUB_OUTPUT
           else
             echo "formatted_build_date=Unknown" >> $GITHUB_OUTPUT
           fi
