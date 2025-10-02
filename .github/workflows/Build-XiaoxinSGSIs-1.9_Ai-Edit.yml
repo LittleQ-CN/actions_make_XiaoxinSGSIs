@@ -55,14 +55,12 @@ jobs:
             echo "make_smartisanos=$(jq -r '.make_smartisanos // "false"' sgsi.json)"  # 修复：j→jq
             echo "make_zui=$(jq -r '.make_zui // "false"' sgsi.json)"
             echo "make_super=$(jq -r '.make_super // "false"' sgsi.json)"
-            # 新增：WeTransfer上传开关（从sgsi.json读取，默认false）
-            echo "upload_wetransfer=$(jq -r '.upload_wetransfer // "false"' sgsi.json)"
           } >> $GITHUB_OUTPUT
            
       - name: "Install Essential Tools (安装基础工具)"
         run: |
           sudo apt-get update
-          # 修复：添加zip unzip（用于打包补丁）
+          # 新增：zip unzip（用于补丁打包）
           sudo apt-get install -y aria2 curl jq brotli android-sdk-libsparse-utils zip unzip
           echo "✅ 基础工具安装完成"
           
@@ -463,10 +461,9 @@ jobs:
           # Save upload directory path (保存上传目录路径)
           echo "UPLOAD_DIR=${GITHUB_WORKSPACE}/upload" >> $GITHUB_ENV
              
-      # ===== 新增：WeTransfer上传（transfer.sh，7天有效）=====
+      # ===== 新增：WeTransfer上传（生成7天有效链接）=====
       - name: "Upload to WeTransfer"
         id: upload_wetransfer
-        if: steps.config.outputs.upload_wetransfer == 'true'  # 从sgsi.json读取开关，默认false
         run: |
           # 检查上传目录是否存在且非空
           if [[ ! -d "${{ env.UPLOAD_DIR }}" || -z "$(ls -A ${{ env.UPLOAD_DIR }})" ]]; then
@@ -474,19 +471,19 @@ jobs:
             exit 0
           fi
           
-          # 上传文件到transfer.sh（7天有效），支持多文件
+          # 使用transfer.sh上传（7天有效）
           response=$(curl -s -F "file=@${{ env.UPLOAD_DIR }}/*" "https://transfer.sh/?expire=7d")
           
-          # 处理上传错误（非零exit code或响应含"error"）
+          # 处理上传错误
           if [[ $? -ne 0 || -z "$response" || "$response" == *"error"* ]]; then
             echo "::warning::⚠️ WeTransfer上传失败，响应：$response"
             exit 0
           fi
           
-          # 保存链接到输出变量（用于Release描述）
+          # 保存链接到输出变量
           echo "link=$response" >> $GITHUB_OUTPUT
           echo "✅ WeTransfer上传成功，链接（7天有效）：$response"
-          
+
       # ===== 新增：GitHub Artifacts上传（保留30天）=====
       - name: "Upload to GitHub Artifacts"
         uses: actions/upload-artifact@v4
@@ -494,15 +491,15 @@ jobs:
           name: sgsi-build-artifacts  # Artifact名称（可自定义）
           path: ${{ env.UPLOAD_DIR }}/*  # 上传目录中的所有文件
           retention-days: 30  # 保留30天
-        continue-on-error: true  # 上传失败不中断workflow
+        continue-on-error: true  # 上传失败不中断工作流
              
       - name: "Generate Release Tag and Time Info (生成发布标签和时间信息)"
         id: release_tag
         run: |
-          # 生成唯一标签以避免冲突
-          current_date=$(TZ='Asia/Shanghai' date +"%Y%m%d")
-          timestamp=$(TZ='Asia/Shanghai' date +"%H%M%S")
-          release_tag="${current_date}_${timestamp}"
+          # 生成精简标签（2位年份+月日_小时分钟，如251002_1930）
+          current_date=$(TZ='Asia/Shanghai' date +"%y%m%d")  # 2位年份（如25）
+          timestamp=$(TZ='Asia/Shanghai' date +"%H%M")       # 小时+分钟（如1930）
+          release_tag="${current_date}_${timestamp}"         # 组合为251002_1930
           echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           
           # 获取当前构建时间（北京时间），格式：2025-09-30 下午 01:38 [北京时间]
@@ -549,7 +546,7 @@ jobs:
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           echo "rom_type=$rom_type" >> $GITHUB_OUTPUT
           
-          # 输出调试信息
+          # 输出调试信息（验证标签格式）
           echo "Generated release tag: $release_tag (生成的发布标签: $release_tag)"
           echo "Build time: $build_time (构建时间: $build_time)"
           echo "ROM type: $rom_type (ROM 类型: $rom_type)"
@@ -557,13 +554,13 @@ jobs:
       - name: "Create Release (创建发布)"
         uses: softprops/action-gh-release@v1
         with:
-          # 发布名称（包含标签和工具版本）
+          # 发布名称（保持原有格式，包含精简标签）
           name: "Auto Build SGSI - XiaoxinTools 1.9-AB [${{ steps.release_tag.outputs.release_tag }}]"
-          # 发布标签（唯一）
+          # 发布标签（精简后，如251002_1930）
           tag_name: "${{ steps.release_tag.outputs.release_tag }}"
           # 上传所有打包后的文件
           files: "${{ env.UPLOAD_DIR }}/*"
-          # 发布描述（新增WeTransfer链接+调整信息顺序）
+          # 发布描述（新增下载链接+调整信息顺序）
           body: |
             ##  📱 SGSI Build Information (构建信息)
             
@@ -578,8 +575,8 @@ jobs:
             - **原构建日期 (Source Build Date):** ${{ steps.release_tag.outputs.formatted_build_date }}
             
             ### 下载链接 (Download Links)
-            - **WeTransfer（7天有效）:** ${{ steps.upload_wetransfer.outputs.link }}  # 新增WeTransfer链接
-            - **GitHub Artifacts（30天保留）:** [点击下载](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)  # 新增Artifacts链接
+            - **WeTransfer（7天有效）:** ${{ steps.upload_wetransfer.outputs.link }}
+            - **GitHub Artifacts（30天保留）:** [点击下载](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
             
             ### 其他信息 (Other Info)
             - **构建工具 (Build Tools):** XiaoxinTools_1.9 (Only for Android 10/AB)
