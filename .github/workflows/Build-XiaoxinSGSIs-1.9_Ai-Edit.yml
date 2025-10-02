@@ -461,7 +461,7 @@ jobs:
           echo "UPLOAD_DIR=${GITHUB_WORKSPACE}/upload" >> $GITHUB_ENV
              
       - name: "Upload to WeTransfer"
-        id: upload_wetransfer
+        id: upload_transfer  # 修改为 upload_transfer
         if: steps.config.outputs.upload_wetransfer == 'true'
         run: |
           # 检查上传目录是否存在且非空
@@ -557,7 +557,7 @@ jobs:
           tag_name: "${{ steps.release_tag.outputs.release_tag }}"
           # 上传所有打包后的文件
           files: "${{ env.UPLOAD_DIR }}/*"
-          # 发布描述
+          # 发布描述（更新WeTransfer步骤ID引用）
           body: |
             ##  📱 SGSI Build Information (构建信息)
             
@@ -572,7 +572,7 @@ jobs:
             - **原构建日期 (Source Build Date):** ${{ steps.release_tag.outputs.formatted_build_date }}
             
             ### 下载链接 (Download Links)
-            - **WeTransfer（7天有效）:** ${{ steps.upload_wetransfer.outputs.link }}
+            - **WeTransfer（7天有效）:** ${{ steps.upload_transfer.outputs.link }}
             - **GitHub Artifacts（30天保留）:** [点击下载](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
             
             ### 其他信息 (Other Info)
