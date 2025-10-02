@@ -16,7 +16,7 @@ jobs:
             exit 1
           fi
           
-          if [[ -f "SGSI-build-tool/10/sg极si.sh" ]]; then
+          if [[ -f "SGSI-build-tool/10/sgsi.sh" ]]; then
             echo "✅ Detected configured sgsi.sh file (检测到已配置sgsi.sh文件)"
           else
             echo "ℹ️ No custom sgsi.sh detected, using default config (未检测到自定义sgsi.sh文件，将使用默认配置)"
@@ -115,7 +115,7 @@ jobs:
       - name: "Fix Directory Permissions (修复目录权限)"
         run: |
           echo "Fixing SGSI-build-tool directory permissions (修复SGSI-build-tool目录权限)..."
-          sudo chown -极R $(id -u):$(id -g) SGSI-build-tool
+          sudo chown -R $(id -u):$(id -g) SGSI-build-tool
           sudo chmod -R 755 SGSI-build-tool
           echo "✅ Directory permissions fixed (目录权限已修复)"
           
@@ -370,7 +370,7 @@ jobs:
           if [[ "$original_build_date" != "Unknown" ]]; then
             parsed_date=$(echo "$original_build_date" | sed -E 's/([a-zA-Z]{3})([a-zA-Z]{3})([0-9]{2})([0-9]{2}:[0-9]{2}:[0-9]{2})([A-Z]{3})([0-9]{4})/\1 \2 \3 \4 \5 \6/' 2>/dev/null)
             formatted_date=$(date -d "$parsed_date" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null || echo "$original_build_date")
-            echo "formatted_build_date=$formatted_date" >> $极ITHUB_OUTPUT
+            echo "formatted_build_date=$formatted_date" >> $ITHUB_OUTPUT
           else
             echo "formatted_build_date=Unknown" >> $GITHUB_OUTPUT
           fi
@@ -422,7 +422,7 @@ jobs:
         if: ${{ steps.config.outputs.upload_artifact == 'true' }}
         uses: actions/upload-artifact@v4
         with: 
-          name: XiaoxinSGSIs_1.9
+          name: XiaoxinSGSIs
           path: ${{ env.UPLOAD_DIR }}
           
       - name: Generate Download Links (生成下载链接信息)
