@@ -155,18 +155,14 @@ jobs:
           cd SGSI-build-tool/10
           echo "Checking and fixing SGSI.sh script errors (检查并修复SGSI.sh脚本错误)..."
           if [[ -f "SGSI.sh" ]]; then
-            # 修复条件判断中的语法错误
-            # 将 [ = "value" ] 格式修复为 [ "" = "value" ]
-            sudo sed -i 's/\[ *= *"\([^"]*\)" *\]/[ "" = "\1" ]/g' SGSI.sh
-            sudo sed -i 's/\[ *== *"\([^"]*\)" *\]/[ "" = "\1" ]/g' SGSI.sh
+            # 修复第9行和第12行的变量引用问题
+            # 将 [ $dynamic = 'y' ] 修复为 [ "$dynamic" = 'y' ]
+            sudo sed -i '9s/\[ \$dynamic = /[ "$dynamic" = /' SGSI.sh
+            sudo sed -i '12s/\[ \$dynamic = /[ "$dynamic" = /' SGSI.sh
             
-            # 修复变量判断的语法
-            sudo sed -i 's/\[ *\$\([a-zA-Z_][a-zA-Z0-9_]*\) *== *"\([^"]*\)" *]/[ "$\1" = "\2" ]/g' SGSI.sh
-            sudo sed -i 's/\[ *\$\([a-zA-Z_][a-zA-Z0-9_]*\) *= *"\([^"]*\)" *]/[ "$\1" = "\2" ]/g' SGSI.sh
-            
-            # 修复空变量检查
-            sudo sed -i 's/\[ *\$\([a-zA-Z_][a-zA-Z0-9_]*\) *\]/[ -n "$\1" ]/g' SGSI.sh
-            sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/[ -n "\1" ]/g' SGSI.sh
+            # 修复其他可能的变量引用问题
+            sudo sed -i 's/\[ \$light = /[ "$light" = /g' SGSI.sh
+            sudo sed -i 's/\[ \$mane = /[ "$mane" = /g' SGSI.sh
             
             echo "✅ Script syntax errors fixed (已修复脚本语法错误)"
             
