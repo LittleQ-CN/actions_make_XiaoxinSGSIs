@@ -14,7 +14,7 @@ jobs:
         run: |
           # Check sgsi.json config file (检查sgsi.json配置文件)
           if [[ ! -f "sgsi.json" ]]; then
-            echo "::error::❌ Missing sg极si.json config file (缺少sgsi.json配置文件)"
+            echo "::error::❌ Missing sgsi.json config file (缺少sgsi.json配置文件)"
             exit 1
           fi
           
@@ -28,7 +28,7 @@ jobs:
       - name: "Clean Up Environment (清理环境)"
         run: |
           echo "🗑️ Starting full cleanup (启动全面清理)..."
-          sudo apt-get autoremove -极y --purge
+          sudo apt-get autoremove -y --purge
           sudo apt-get clean
           sudo rm -rf /usr/share.docker /etc/mysql /etc/php /etc/apt/sources.list.d || true
           echo "✅ Cleanup complete! Disk space (清理完成！磁盘空间):"
@@ -188,7 +188,7 @@ jobs:
           rom_type="Generic"
           if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
-          if [ "${{ steps.config.outputs.make_coloros }}" = "true" ]; then rom_type极="ColorOS"; fi
+          if [ "${{ steps.config.outputs.make_coloros }}" = "true" ]; then rom_type="ColorOS"; fi
           if [ "${{ steps.config.outputs.make_h2os }}" = "true" ]; then rom_type="H2OS"; fi
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
@@ -198,7 +198,7 @@ jobs:
           # Configure Super SGSI (配置Super SGSI)
           if [ "${{ steps.config.outputs.make_super }}" = "true" ]; then
             echo "Configuring Super SGSI (配置Super SGSI)..."
-            if [[ -f "SGSI-build极-tool/10/make.sh" ]]; then
+            if [[ -f "SGSI-build-tool/10/make.sh" ]]; then
               sudo sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
               echo "Super SGSI configuration completed (Super SGSI配置完成)"
             else
@@ -314,7 +314,7 @@ jobs:
             device_codename=$(grep -E 'ro.product.(device|name|board|hardware)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
             echo "🔤 Extracted device codename: $device_codename (提取的机型代号: $device_codename)"
             
-            # Security patch date (安全补极日期)
+            # Security patch date (安全补日期)
             security_patch=$(grep 'ro.build.version.security_patch' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
             echo "🔒 Security patch date: $security_patch (安全补丁日期: $security_patch)"
             
@@ -527,7 +527,7 @@ jobs:
           # 发布标签（唯一） / Release tag (unique)
           tag_name: "${{ steps.release_tag.outputs.release_tag }}"
           # 上传所有打包后的文件 / Upload all packaged files
-          files: "${{ env.UPL极OAD_DIR }}/*"
+          files: "${{ env.UPLOAD_DIR }}/*"
           # 发布描述 / Release description
           body: |
             ##  📱 SGSI Build Information (构建信息)
@@ -569,7 +569,7 @@ jobs:
         if: ${{ steps.config.outputs.upload_artifact == 'true' }}
         uses: actions/upload-artifact@v4
         with: 
-          name: XiaoxinSGSIs
+          name: XiaoxinSGSIs_1.9
           path: ${{ env.UPLOAD_DIR }}
       # ========================
       
