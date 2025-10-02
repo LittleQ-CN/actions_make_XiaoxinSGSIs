@@ -153,10 +153,29 @@ jobs:
           
           # Fix script syntax errors (修复脚本语法错误)
           cd SGSI-build-tool/10
+          echo "Checking and fixing SGSI.sh script errors (检查并修复SGSI.sh脚本错误)..."
           if [[ -f "SGSI.sh" ]]; then
-            sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/\[ -n "\1" ]/g' SGSI.sh
-            sudo sed -i 's/==/=/g' SGSI.sh
-            echo "✅ Script syntax fixed (脚本语法已修复)"
+            # 修复条件判断中的语法错误
+            # 将 [ = "value" ] 格式修复为 [ "" = "value" ]
+            sudo sed -i 's/\[ *= *"\([^"]*\)" *\]/[ "" = "\1" ]/g' SGSI.sh
+            sudo sed -i 's/\[ *== *"\([^"]*\)" *\]/[ "" = "\1" ]/g' SGSI.sh
+            
+            # 修复变量判断的语法
+            sudo sed -i 's/\[ *\$\([a-zA-Z_][a-zA-Z0-9_]*\) *== *"\([^"]*\)" *]/[ "$\1" = "\2" ]/g' SGSI.sh
+            sudo sed -i 's/\[ *\$\([a-zA-Z_][a-zA-Z0-9_]*\) *= *"\([^"]*\)" *]/[ "$\1" = "\2" ]/g' SGSI.sh
+            
+            # 修复空变量检查
+            sudo sed -i 's/\[ *\$\([a-zA-Z_][a-zA-Z0-9_]*\) *\]/[ -n "$\1" ]/g' SGSI.sh
+            sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/[ -n "\1" ]/g' SGSI.sh
+            
+            echo "✅ Script syntax errors fixed (已修复脚本语法错误)"
+            
+            # 显示修复后的相关行
+            echo "=== Fixed lines 9 and 12 (修复后的第9行和第12行) ==="
+            sed -n '9p;12p' SGSI.sh
+            echo "=================================================="
+          else
+            echo "::warning::⚠️ SGSI.sh script not found (未找到SGSI.sh脚本)"
           fi
           
           # Prepare build files (准备构建文件)
@@ -410,8 +429,9 @@ jobs:
           else
             echo "❌ Build failed or cancelled (构建失败或被取消)"
             echo "=== Error Summary (错误总结) ==="
-            [[ -f "SGSI-build-tool/10/make.log" ]] && \
+            if [[ -f "SGSI-build-tool/10/make.log" ]]; then
               grep -i -A5 -B5 "error\|failed" SGSI-build-tool/10/make.log | tail -50 || true
+            fi
           fi
           
           echo "💾 Final disk space (最终磁盘空间):"
