@@ -64,14 +64,18 @@ jobs:
            
       - name: Initialization environment
         run: |
-          sudo tar -xf SGSI-build-tool.tar
-          sudo rm -rf SGSI-build-tool/10/setup.sh
-          sudo mv bin/setup.sh SGSI-build-tool/10/
+          # 使用当前用户权限解压，避免权限问题
+          tar -xf SGSI-build-tool.tar
+          rm -rf SGSI-build-tool/10/setup.sh
+          mv bin/setup.sh SGSI-build-tool/10/
           cd SGSI-build-tool/10
-          sudo bash setup.sh
+          # 在解压后立即设置文件权限
+          find . -type f -name "*.sh" -exec chmod +x {} \;
+          chmod +x bin/mke2fs bin/e2fsdroid
+          bash setup.sh
            
       - name: Download Rom
-        run: sudo wget -c "${{ steps.var.outputs.rom_url }}" -O "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
+        run: wget -c "${{ steps.var.outputs.rom_url }}" -O "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
        
       - name: Build Super SGSI
         if: ${{ steps.var.outputs.make_super == 'true' }}
@@ -83,44 +87,50 @@ jobs:
         if: ${{ steps.var.outputs.make_miui == 'true' }}
         run: |
           cd SGSI-build-tool/10
-          sudo rm -rf fixbug/fixbug.sh
+          rm -rf fixbug/fixbug.sh
           cp ../../fix/MIUI.sh fixbug/fixbug.sh
+          chmod +x fixbug/fixbug.sh
            
       - name: Make Flyme SGSI
         if: ${{ steps.var.outputs.make_flyme == 'true' }}
         run: |
           cd SGSI-build-tool/10
-          sudo rm -rf fixbug/fixbug.sh
+          rm -rf fixbug/fixbug.sh
           cp ../../fix/Flyme.sh fixbug/fixbug.sh
+          chmod +x fixbug/fixbug.sh
            
       - name: Make ColorOS SGSI
         if: ${{ steps.var.outputs.make_coloros == 'true' }}
         run: |
           cd SGSI-build-tool/10
-          sudo python3 oppo_ozip/ozipdecrypt.py "tmp/${{ steps.var.outputs.rom_name }}"
-          sudo rm -rf "tmp/${{ steps.var.outputs.rom_name }}" fixbug/fixbug.sh
+          python3 oppo_ozip/ozipdecrypt.py "tmp/${{ steps.var.outputs.rom_name }}"
+          rm -rf "tmp/${{ steps.var.outputs.rom_name }}" fixbug/fixbug.sh
           cp ../../fix/ColorOS.sh fixbug/fixbug.sh
+          chmod +x fixbug/fixbug.sh
            
       - name: Make H2OS SGSI
         if: ${{ steps.var.outputs.make_h2os == 'true' }}
         run: |
           cd SGSI-build-tool/10
-          sudo rm -rf fixbug/fixbug.sh
+          rm -rf fixbug/fixbug.sh
           cp ../../fix/H2OS.sh fixbug/fixbug.sh
+          chmod +x fixbug/fixbug.sh
            
       - name: Make SmartisanOS SGSI
         if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
         run: |
           cd SGSI-build-tool/10
-          sudo rm -rf fixbug/fixbug.sh
+          rm -rf fixbug/fixbug.sh
           cp ../../fix/SmartisanOS.sh fixbug/fixbug.sh
+          chmod +x fixbug/fixbug.sh
            
       - name: Make ZUI SGSI
         if: ${{ steps.var.outputs.make_zui == 'true' }}
         run: |
           cd SGSI-build-tool/10
-          sudo rm -rf fixbug/fixbug.sh
+          rm -rf fixbug/fixbug.sh
           cp ../../fix/ZUI.sh fixbug/fixbug.sh
+          chmod +x fixbug/fixbug.sh
 
       - name: Set Build Environment
         run: |
@@ -137,15 +147,16 @@ jobs:
           cp -r ../../bin/. bin/
           cp -r ../../make/. .
           
-          # 设置执行权限
-          chmod +x SGSI.sh makeimg.sh dynamic_SGSI.sh oppo.sh make.sh
+          # 确保必要的脚本有执行权限
+          find . -type f -name "*.sh" -exec chmod +x {} \;
           chmod +x bin/mke2fs bin/e2fsdroid
           
           # 设置环境变量
           export LIGHT_FIX="$LIGHT_FIX"
           export BUG_FIX="$BUG_FIX"
           
-          sudo bash make.sh
+          # 不使用sudo执行make.sh
+          bash make.sh
 
       - name: Make Patch Module
         run: |
@@ -191,6 +202,7 @@ jobs:
         run: |
           cd SGSI-build-tool/10
           curl -sL https://git.io/file-transfer | sh
+          chmod +x transfer
           ./transfer wet "${{ steps.var.outputs.pack_sgsi }}"
           
       - name: Upload SGSI to Artifact
