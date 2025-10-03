@@ -64,10 +64,28 @@ jobs:
            
       - name: Initialization environment
         run: |
+          # 解压工具包
           sudo tar -xf SGSI-build-tool.tar
+          
+          # 替换setup.sh
           sudo rm -rf SGSI-build-tool/10/setup.sh
           sudo mv bin/setup.sh SGSI-build-tool/10/
+          
+          # 在初始化环境之前复制所有必要的工具文件
           cd SGSI-build-tool/10
+          sudo cp -r ../../tools/new_fs/. new_fs/ || echo "new_fs复制完成"
+          sudo cp -r ../../tools/add_lib/. add_lib/ || echo "add_lib复制完成"
+          sudo cp -r ../../tools/add_lib64/. add_lib64/ || echo "add_lib64复制完成"
+          sudo cp -r ../../tools/mergefs/. mergefs/ || echo "mergefs复制完成"
+          sudo cp -r ../../tools/cp_phh/. cp_phh/ || echo "cp_phh复制完成"
+          sudo cp -r ../../tools/phh_lib64/. phh_lib64/ || echo "phh_lib64复制完成"
+          sudo cp -r ../../tools/phh_lib/. phh_lib/ || echo "phh_lib复制完成"
+          
+          # 设置执行权限
+          sudo find . -name "*.sh" -exec chmod +x {} \;
+          sudo chmod +x bin/mke2fs bin/e2fsdroid
+          
+          # 运行环境设置
           sudo bash setup.sh
            
       - name: Download Rom
@@ -85,6 +103,7 @@ jobs:
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
           sudo cp ../../fix/MIUI.sh fixbug/fixbug.sh
+          sudo chmod +x fixbug/fixbug.sh
            
       - name: Make Flyme SGSI
         if: ${{ steps.var.outputs.make_flyme == 'true' }}
@@ -92,6 +111,7 @@ jobs:
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
           sudo cp ../../fix/Flyme.sh fixbug/fixbug.sh
+          sudo chmod +x fixbug/fixbug.sh
            
       - name: Make ColorOS SGSI
         if: ${{ steps.var.outputs.make_coloros == 'true' }}
@@ -100,6 +120,7 @@ jobs:
           sudo python3 oppo_ozip/ozipdecrypt.py "tmp/${{ steps.var.outputs.rom_name }}"
           sudo rm -rf "tmp/${{ steps.var.outputs.rom_name }}" fixbug/fixbug.sh
           sudo cp ../../fix/ColorOS.sh fixbug/fixbug.sh
+          sudo chmod +x fixbug/fixbug.sh
            
       - name: Make H2OS SGSI
         if: ${{ steps.var.outputs.make_h2os == 'true' }}
@@ -107,6 +128,7 @@ jobs:
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
           sudo cp ../../fix/H2OS.sh fixbug/fixbug.sh
+          sudo chmod +x fixbug/fixbug.sh
            
       - name: Make SmartisanOS SGSI
         if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
@@ -114,6 +136,7 @@ jobs:
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
           sudo cp ../../fix/SmartisanOS.sh fixbug/fixbug.sh
+          sudo chmod +x fixbug/fixbug.sh
            
       - name: Make ZUI SGSI
         if: ${{ steps.var.outputs.make_zui == 'true' }}
@@ -121,20 +144,22 @@ jobs:
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
           sudo cp ../../fix/ZUI.sh fixbug/fixbug.sh
+          sudo chmod +x fixbug/fixbug.sh
             
       - name: Generate SGSI
         run: |
           cd SGSI-build-tool/10
           
-          # 修复关键文件缺失问题
+          # 只复制必要的配置和二进制文件
           sudo cp -r ../../bin/. bin/
           sudo cp -r ../../make/. .
           
-          # 设置执行权限
-          sudo chmod +x SGSI.sh makeimg.sh dynamic_SGSI.sh oppo.sh make.sh
+          # 确保所有脚本都有执行权限
+          sudo find . -name "*.sh" -exec chmod +x {} \;
           sudo chmod +x bin/mke2fs bin/e2fsdroid
           
-          sudo bash make.sh
+          # 使用非交互模式运行构建
+          echo -e "y\ny\nn" | sudo bash make.sh
 
       - name: Make Patch Module
         run: |
