@@ -71,25 +71,35 @@ jobs:
           sudo rm -rf SGSI-build-tool/10/setup.sh
           sudo mv bin/setup.sh SGSI-build-tool/10/
           
-          # 在初始化环境之前复制所有必要的工具文件
           cd SGSI-build-tool/10
-          sudo cp -r ../../tools/new_fs/. new_fs/ || echo "new_fs复制完成"
-          sudo cp -r ../../tools/add_lib/. add_lib/ || echo "add_lib复制完成"
-          sudo cp -r ../../tools/add_lib64/. add_lib64/ || echo "add_lib64复制完成"
-          sudo cp -r ../../tools/mergefs/. mergefs/ || echo "mergefs复制完成"
-          sudo cp -r ../../tools/cp_phh/. cp_phh/ || echo "cp_phh复制完成"
-          sudo cp -r ../../tools/phh_lib64/. phh_lib64/ || echo "phh_lib64复制完成"
-          sudo cp -r ../../tools/phh_lib/. phh_lib/ || echo "phh_lib复制完成"
           
           # 设置执行权限
-          sudo find . -name "*.sh" -exec chmod +x {} \;
-          sudo chmod +x bin/mke2fs bin/e2fsdroid
+          sudo find . -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+          sudo chmod +x bin/mke2fs bin/e2fsdroid 2>/dev/null || true
           
           # 运行环境设置
           sudo bash setup.sh
            
       - name: Download Rom
-        run: sudo wget -c "${{ steps.var.outputs.rom_url }}" -O "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
+        run: |
+          echo "📥 Downloading ROM from ${{ steps.var.outputs.rom_url }}"
+          cd SGSI-build-tool/10/tmp
+          sudo wget -c "${{ steps.var.outputs.rom_url }}" -O "${{ steps.var.outputs.rom_name }}" || exit 1
+          
+          # 检查文件是否下载成功
+          if [ ! -f "${{ steps.var.outputs.rom_name }}" ]; then
+            echo "❌ ROM下载失败: ${{ steps.var.outputs.rom_name }}"
+            exit 1
+          fi
+          
+          # 检查文件大小
+          file_size=$(sudo stat -c%s "${{ steps.var.outputs.rom_name }}" 2>/dev/null || echo "0")
+          echo "📦 ROM文件大小: $file_size 字节"
+          
+          if [ "$file_size" -lt 1000000 ]; then
+            echo "❌ 下载的文件太小，可能下载失败"
+            exit 1
+          fi
        
       - name: Build Super SGSI
         if: ${{ steps.var.outputs.make_super == 'true' }}
@@ -150,25 +160,41 @@ jobs:
         run: |
           cd SGSI-build-tool/10
           
+          # 检查ROM文件是否存在
+          if [ ! -f "tmp/${{ steps.var.outputs.rom_name }}" ]; then
+            echo "❌ ROM文件不存在: tmp/${{ steps.var.outputs.rom_name }}"
+            echo "当前tmp目录内容:"
+            sudo ls -la tmp/
+            exit 1
+          fi
+          
           # 只复制必要的配置和二进制文件
-          sudo cp -r ../../bin/. bin/
-          sudo cp -r ../../make/. .
+          sudo cp -r ../../bin/. bin/ 2>/dev/null || echo "bin目录复制完成或已存在"
+          sudo cp -r ../../make/. . 2>/dev/null || echo "make目录复制完成或已存在"
           
           # 确保所有脚本都有执行权限
-          sudo find . -name "*.sh" -exec chmod +x {} \;
-          sudo chmod +x bin/mke2fs bin/e2fsdroid
+          sudo find . -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+          sudo chmod +x bin/mke2fs bin/e2fsdroid 2>/dev/null || true
           
           # 使用非交互模式运行构建
-          echo -e "y\ny\nn" | sudo bash make.sh
+          echo "🏗️ 开始构建SGSI..."
+          sudo bash make.sh
 
       - name: Make Patch Module
         run: |
           cd SGSI-build-tool/10
           
+          # 检查out目录是否存在
+          if [ ! -d "out" ]; then
+            echo "❌ out目录不存在，构建可能失败"
+            exit 1
+          fi
+          
           # 确保out目录存在
           if [ -d "out/vendor" ]; then
             sudo zip -r Patchmod.zip out/vendor/app/* out/vendor/bin/* out/vendor/etc/* out/vendor/lib/* out/vendor/lib64/* out/vendor/overlay/*
             sudo mv Patchmod.zip SGSI/
+            echo "✅ Patchmod创建成功"
           else
             echo "::warning::out/vendor directory not found (out/vendor目录不存在)"
           fi
@@ -184,6 +210,7 @@ jobs:
             sudo zip -r Patch2.zip Patch2/*
             sudo zip -r Patch3.zip Patch3/*
             sudo mv Patch1.zip Patch2.zip Patch3.zip ../SGSI-build-tool/10/SGSI/
+            echo "✅ Patch文件创建成功"
           else
             echo "::warning::Patch directory not found (Patch目录不存在)"
           fi
@@ -194,9 +221,17 @@ jobs:
           
           # 确保SGSI目录存在
           if [ -d "SGSI" ]; then
+            echo "📦 打包SGSI文件..."
             sudo 7za a -t7z -r "${{ steps.var.outputs.pack_sgsi }}" SGSI/*
+            echo "✅ 打包完成: ${{ steps.var.outputs.pack_sgsi }}"
+            
+            # 显示文件信息
+            echo "📊 打包文件信息:"
+            sudo ls -lh "${{ steps.var.outputs.pack_sgsi }}"
           else
             echo "::error::SGSI directory not found (SGSI目录不存在)"
+            echo "当前目录内容:"
+            sudo ls -la
             exit 1
           fi
 
@@ -204,9 +239,14 @@ jobs:
         if: ${{ steps.var.outputs.upload_transfer == 'true' }}
         run: |
           cd SGSI-build-tool/10
-          curl -sL https://git.io/file-transfer | sh
-          sudo chmod +x transfer
-          sudo ./transfer wet "${{ steps.var.outputs.pack_sgsi }}"
+          if [ -f "${{ steps.var.outputs.pack_sgsi }}" ]; then
+            echo "📤 上传到WeTransfer..."
+            curl -sL https://git.io/file-transfer | sh
+            sudo chmod +x transfer
+            sudo ./transfer wet "${{ steps.var.outputs.pack_sgsi }}"
+          else
+            echo "❌ 打包文件不存在，无法上传"
+          fi
           
       - name: Upload SGSI to Artifact
         if: ${{ steps.var.outputs.upload_artifact == 'true' }}
