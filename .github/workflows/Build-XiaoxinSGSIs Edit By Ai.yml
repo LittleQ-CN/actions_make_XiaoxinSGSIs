@@ -1,4 +1,3 @@
-
 name: build_XiaoxinSGSIs_test
 
 on:
@@ -122,6 +121,14 @@ jobs:
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
           cp ../../fix/ZUI.sh fixbug/fixbug.sh
+
+      - name: Set Build Environment
+        run: |
+          cd SGSI-build-tool/10
+          # 设置环境变量 - 默认开启亮度修复和Bug修复
+          echo "LIGHT_FIX=y" >> $GITHUB_ENV
+          echo "BUG_FIX=y" >> $GITHUB_ENV
+          # 动态分区将在运行时自动检测
             
       - name: Generate SGSI
         run: |
@@ -146,6 +153,10 @@ jobs:
           chmod +x add_lib64/*.sh
           chmod +x mergefs/*.sh
           chmod +x phh_lib64/*.sh
+          
+          # 设置环境变量
+          export LIGHT_FIX="$LIGHT_FIX"
+          export BUG_FIX="$BUG_FIX"
           
           sudo bash make.sh
 
