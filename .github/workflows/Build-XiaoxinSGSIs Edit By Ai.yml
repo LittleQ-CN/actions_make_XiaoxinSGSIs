@@ -128,31 +128,18 @@ jobs:
           # 设置环境变量 - 默认开启亮度修复和Bug修复
           echo "LIGHT_FIX=y" >> $GITHUB_ENV
           echo "BUG_FIX=y" >> $GITHUB_ENV
-          # 动态分区将在运行时自动检测
             
       - name: Generate SGSI
         run: |
           cd SGSI-build-tool/10
           
-          # 修复关键文件缺失问题
+          # 修复关键文件缺失问题（只保留必要的复制）
           cp -r ../../bin/. bin/
           cp -r ../../make/. .
-          cp -r ../../tools/new_fs/. new_fs/
-          cp -r ../../tools/add_lib/. add_lib/
-          cp -r ../../tools/add_lib64/. add_lib64/
-          cp -r ../../tools/mergefs/. mergefs/
-          cp -r ../../tools/cp_phh/. cp_phh/
-          cp -r ../../tools/phh_lib64/. phh_lib64/
-          cp -r ../../tools/phh_lib/. phh_lib/
           
           # 设置执行权限
           chmod +x SGSI.sh makeimg.sh dynamic_SGSI.sh oppo.sh make.sh
           chmod +x bin/mke2fs bin/e2fsdroid
-          chmod +x new_fs/*.sh
-          chmod +x add_lib/*.sh
-          chmod +x add_lib64/*.sh
-          chmod +x mergefs/*.sh
-          chmod +x phh_lib64/*.sh
           
           # 设置环境变量
           export LIGHT_FIX="$LIGHT_FIX"
