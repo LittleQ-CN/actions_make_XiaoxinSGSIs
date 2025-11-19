@@ -100,31 +100,108 @@ jobs:
           
           echo "✅ Environment initialization complete (环境初始化完成)"
           
-      - name: "Fix Toolchain Issues (修复工具链问题)"
+      - name: "Fix Toolchain Issues (修复工具链问题) - 方案一"
         run: |
           cd SGSI-build-tool/10
           echo "🛠️ Fixing binary compatibility (修复二进制兼容性)..."
           
-          # Create necessary directories (创建必要目录)
+          # 创建必要目录
           sudo mkdir -p bin
           
-          # Create symbolic links for essential tools only (仅为必要工具创建符号链接)
-          for tool in brotli simg2img img2simg mke2fs e2fsdroid; do
-            tool_location=$(which $tool 2>/dev/null)
-            if [[ -n "$tool_location" ]]; then
-              sudo ln -sf "$tool_location" bin/$tool
-              echo "✅ Linked $tool from $tool_location"
+          # 只链接确实存在的工具
+          for tool in brotli simg2img img2simg; do
+            if command -v $tool >/dev/null 2>&1; then
+              sudo ln -sf "$(command -v $tool)" bin/$tool
+              echo "✅ Linked $tool from $(command -v $tool)"
             else
               echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
-              # 尝试从系统路径查找
-              if [ -f "/usr/bin/$tool" ]; then
-                sudo ln -sf "/usr/bin/$tool" bin/$tool
-                echo "✅ Linked $tool from /usr/bin/$tool"
-              fi
             fi
           done
           
+          # 特殊处理mke2fs
+          if [ -f "/usr/sbin/mke2fs" ]; then
+            sudo ln -sf "/usr/sbin/mke2fs" bin/mke2fs
+            echo "✅ Linked mke2fs from /usr/sbin/mke2fs"
+          elif command -v mke2fs >/dev/null 2>&1; then
+            sudo ln -sf "$(command -v mke2fs)" bin/mke2fs
+            echo "✅ Linked mke2fs from $(command -v mke2fs)"
+          else
+            echo "::warning::⚠️ mke2fs not found (未找到mke2fs)"
+          fi
+          
+          # e2fsdroid可能不存在，跳过它
+          if command -v e2fsdroid >/dev/null 2>&1; then
+            sudo ln -sf "$(command -v e2fsdroid)" bin/e2fsdroid
+            echo "✅ Linked e2fsdroid from $(command -v e2fsdroid)"
+          else
+            echo "ℹ️ e2fsdroid not found, skipping (未找到e2fsdroid，跳过)"
+          fi
+          
           echo "✅ Essential binary tools linked (必需二进制工具链接完成)"
+          cd ../..
+          
+      - name: "Fix Toolchain Issues - 备用方案"
+        if: failure()
+        run: |
+          cd SGSI-build-tool/10
+          echo "🛠️ Using alternative toolchain fix method (使用备用工具链修复方法)..."
+          
+          # 创建必要目录
+          sudo mkdir -p bin
+          
+          # 调试：显示当前目录和权限
+          echo "=== Debug Info (调试信息) ==="
+          pwd
+          ls -la
+          echo "============================"
+          
+          # 逐个工具处理，添加详细调试
+          tools=("brotli" "simg2img" "img2simg" "mke2fs")
+          
+          for tool in "${tools[@]}"; do
+            echo "Processing tool: $tool"
+            
+            # 尝试多种方式查找工具
+            tool_path=""
+            if command -v $tool >/dev/null 2>&1; then
+              tool_path=$(command -v $tool)
+              echo "  Found via command -v: $tool_path"
+            elif [ -f "/usr/bin/$tool" ]; then
+              tool_path="/usr/bin/$tool"
+              echo "  Found in /usr/bin: $tool_path"
+            elif [ -f "/usr/sbin/$tool" ]; then
+              tool_path="/usr/sbin/$tool"
+              echo "  Found in /usr/sbin: $tool_path"
+            elif [ -f "/bin/$tool" ]; then
+              tool_path="/bin/$tool"
+              echo "  Found in /bin: $tool_path"
+            else
+              echo "  ❌ Tool not found: $tool"
+              continue
+            fi
+            
+            # 创建符号链接
+            if [ -n "$tool_path" ]; then
+              if sudo ln -sf "$tool_path" "bin/$tool"; then
+                echo "  ✅ Successfully linked $tool"
+                # 验证链接
+                if [ -L "bin/$tool" ]; then
+                  echo "  🔗 Link verified: $(readlink "bin/$tool")"
+                else
+                  echo "  ⚠️ Link creation may have failed"
+                fi
+              else
+                echo "  ❌ Failed to create link for $tool"
+              fi
+            fi
+            echo "---"
+          done
+          
+          echo "=== Final bin directory contents ==="
+          ls -la bin/ || echo "bin directory does not exist"
+          echo "==================================="
+          
+          echo "✅ Toolchain fixing completed (工具链修复完成)"
           cd ../..
           
       - name: "Fix Directory Permissions (修复目录权限)"
