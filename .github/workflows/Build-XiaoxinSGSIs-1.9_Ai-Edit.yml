@@ -55,14 +55,11 @@ jobs:
             echo "make_smartisanos=$(jq -r '.make_smartisanos // "false"' sgsi.json)"
             echo "make_zui=$(jq -r '.make_zui // "false"' sgsi.json)"
             echo "make_super=$(jq -r '.make_super // "false"' sgsi.json)"
-            # 新增：WeTransfer上传开关（从sgsi.json读取，默认false）
-            echo "upload_wetransfer=$(jq -r '.upload_wetransfer // "false"' sgsi.json)"
           } >> $GITHUB_OUTPUT
            
       - name: "Install Essential Tools (安装基础工具)"
         run: |
           sudo apt-get update
-          # 修复：添加zip unzip（用于打包补丁）
           sudo apt-get install -y aria2 curl jq brotli android-sdk-libsparse-utils zip unzip
           echo "✅ 基础工具安装完成"
           
@@ -112,13 +109,18 @@ jobs:
           sudo mkdir -p bin
           
           # Create symbolic links for essential tools only (仅为必要工具创建符号链接)
-          for tool in brotli simg2img img2simg mke2fs; do
+          for tool in brotli simg2img img2simg mke2fs e2fsdroid; do
             tool_location=$(which $tool 2>/dev/null)
             if [[ -n "$tool_location" ]]; then
               sudo ln -sf "$tool_location" bin/$tool
               echo "✅ Linked $tool from $tool_location"
             else
               echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
+              # 尝试从系统路径查找
+              if [ -f "/usr/bin/$tool" ]; then
+                sudo ln -sf "/usr/bin/$tool" bin/$tool
+                echo "✅ Linked $tool from /usr/bin/$tool"
+              fi
             fi
           done
           
@@ -146,6 +148,7 @@ jobs:
           
           max_retries=5
           retry_delay=30
+          download_success=false
           
           for i in $(seq 1 $max_retries); do
             echo "Attempt $i/$max_retries (尝试 $i/$max_retries)..."
@@ -153,23 +156,32 @@ jobs:
             # Prefer aria2 if available (优先使用aria2)
             if command -v aria2c &> /dev/null; then
               echo "⚡ Using aria2 download (multi-threaded) (使用aria2下载 - 多线程)"
-              if sudo aria2c -x 8 -s 8 -k 1M "$rom_url" -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")"; then
+              if sudo aria2c -x 8 -s 8 -k 1M --check-certificate=false "$rom_url" -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")"; then
                 echo "✅ aria2 download successful (aria2下载成功)"
+                download_success=true
                 break
+              else
+                echo "❌ aria2 download failed (aria2下载失败)"
+                # 清理可能的损坏文件
+                sudo rm -f "$rom_path" 2>/dev/null || true
               fi
             fi
             
             # Fallback to curl (备用curl)
-            if command -v curl &> /dev/null; then
+            if [ "$download_success" = false ] && command -v curl &> /dev/null; then
               echo "⚡ Using curl download (使用curl下载)"
-              if sudo curl -fL -C - -o "$rom_path" "$rom_url"; then
+              if sudo curl -fL -C - --retry 3 --retry-delay 10 -o "$rom_path" "$rom_url"; then
                 echo "✅ curl download successful (curl下载成功)"
+                download_success=true
                 break
+              else
+                echo "❌ curl download failed (curl下载失败)"
+                sudo rm -f "$rom_path" 2>/dev/null || true
               fi
             fi
             
             if [ $i -eq $max_retries ]; then
-              echo "::error::❌ ROM download failed (ROM下载失败)"
+              echo "::error::❌ ROM download failed after $max_retries attempts (ROM下载失败，已尝试 $max_retries 次)"
               exit 1
             fi
             
@@ -177,8 +189,20 @@ jobs:
             sleep $retry_delay
           done
           
-          echo -e "\n🎉 Download completed (下载完成)"
-          echo "📦 File info (文件信息): $(sudo ls -lh "$rom_path")"
+          # 验证下载文件
+          if [ -f "$rom_path" ]; then
+            file_size=$(stat -c%s "$rom_path" 2>/dev/null || echo "0")
+            if [ "$file_size" -lt 1024 ]; then
+              echo "::error::❌ Downloaded file is too small ($file_size bytes), likely corrupted (下载文件过小，可能已损坏)"
+              exit 1
+            fi
+            echo -e "\n🎉 Download completed (下载完成)"
+            echo "📦 File info (文件信息): $(sudo ls -lh "$rom_path")"
+            echo "📊 File size: $(numfmt --to=iec $file_size)"
+          else
+            echo "::error::❌ Download file not found (下载文件未找到)"
+            exit 1
+          fi
 
       - name: "Configure ROM Specific Settings (配置ROM特定设置)"
         run: |
@@ -283,23 +307,47 @@ jobs:
           cd SGSI-build-tool/10
           
           echo "🏗️ Starting SGSI build (开始构建SGSI)..."
-          # Set longer timeout (设置更长的超时时间)
-          timeout 60m bash -c '
+          echo "📝 Build log will be saved to make.log (构建日志将保存到make.log)"
+          
+          # 设置构建超时和更详细的错误处理
+          build_start=$(date +%s)
+          timeout 90m bash -c '
+            set -o pipefail
             if ! sudo bash make.sh 2>&1 | tee make.log; then
-              echo "::error::❌ Build failed! (构建失败！)"
-              echo "=== Last 100 lines of build log (构建日志最后100行) ==="
-              tail -100 make.log
+              echo "::error::❌ Build failed with exit code $? (构建失败，退出代码: $?)"
+              
+              # 分析常见错误
+              if grep -q "out of memory" make.log; then
+                echo "::error::💥 Build failed due to insufficient memory (内存不足导致构建失败)"
+              elif grep -q "No space left" make.log; then
+                echo "::error::💥 Build failed due to disk space (磁盘空间不足导致构建失败)"
+              elif grep -q "Permission denied" make.log; then
+                echo "::error::💥 Build failed due to permission issues (权限问题导致构建失败)"
+              fi
+              
+              echo "=== Last 200 lines of build log (构建日志最后200行) ==="
+              tail -200 make.log
               echo "========================"
               exit 1
             fi
           ' || exit $?
           
+          build_end=$(date +%s)
+          build_duration=$((build_end - build_start))
+          echo "⏱️ Build completed in $(($build_duration / 60)) minutes and $(($build_duration % 60)) seconds (构建用时: $(($build_duration / 60))分$(($build_duration % 60))秒)"
+          
           echo "🎉 SGSI image build completed (SGSI镜像构建完成)"
           
-          # Fix permissions for build output files (修复构建产出文件权限)
+          # 修复构建产出文件权限
           echo "🔒 Fixing permissions for build output files (修复构建产出文件权限)..."
           sudo chown -R $(id -u):$(id -g) out/
           sudo chmod -R 755 out/
+          
+          # 验证构建产出
+          if [[ ! -d "./out/system" ]]; then
+            echo "::error::❌ Build output directory 'out/system' not found (构建产出目录 'out/system' 未找到)"
+            exit 1
+          fi
           
           # Extract detailed device information from build.prop (从build.prop提取详细设备信息)
           if [[ -f "./out/system/system/build.prop" ]]; then
@@ -366,27 +414,33 @@ jobs:
           # 创建目标目录
           sudo mkdir -p SGSI-build-tool/10/SGSI/
           
-          # 打包各补丁目录
+          # 检查每个补丁目录并打包
+          patch_count=0
           for i in {1..3}; do
             patch_dir="Patch/Patch${i}"
             output_file="Patch${i}.zip"
             
-            if [[ -d "$patch_dir" ]]; then
+            if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
               echo "📦 打包补丁: $patch_dir → $output_file"
-              if ! zip -r "$output_file" "$patch_dir"/*; then
+              if ! zip -r -q "$output_file" "$patch_dir"/*; then
                 echo "::warning::⚠️ 补丁打包失败: $patch_dir"
+                # 清理可能的不完整文件
+                rm -f "$output_file" 2>/dev/null || true
               else
-                echo "✅ 补丁打包成功: $output_file"
+                echo "✅ 补丁打包成功: $output_file ($(stat -c%s "$output_file" | numfmt --to=iec) bytes)"
                 sudo mv "$output_file" SGSI-build-tool/10/SGSI/
+                ((patch_count++))
               fi
             else
-              echo "ℹ️ 补丁目录不存在: $patch_dir"
+              echo "ℹ️ 补丁目录不存在或为空: $patch_dir"
             fi
           done
           
-          echo "✅ 补丁文件打包完成"
-          echo "移动后的补丁文件:"
-          sudo ls -lh SGSI-build-tool/10/SGSI/Patch*.zip || true
+          echo "✅ 补丁文件打包完成，成功打包 $patch_count 个补丁"
+          if [[ $patch_count -gt 0 ]]; then
+            echo "移动后的补丁文件:"
+            sudo ls -lh SGSI-build-tool/10/SGSI/Patch*.zip
+          fi
 
       - name: "Package Output Files (打包输出文件)"
         run: |
@@ -394,16 +448,7 @@ jobs:
           
           echo "=== Packaging step (打包步骤) ==="
           
-          # 新增补丁文件检查
-          echo "=== 检查补丁文件 ==="
-          patch_count=$(ls SGSI/Patch*.zip 2>/dev/null | wc -l)
-          if [[ $patch_count -gt 0 ]]; then
-            echo "✅ 检测到 $patch_count 个补丁文件"
-          else
-            echo "ℹ️ 未检测到补丁文件"
-          fi
-          
-          # 验证SGSI目录存在（原有代码）
+          # 验证SGSI目录存在且有内容
           if [[ ! -d "SGSI" ]]; then
             echo "::error::❌ SGSI directory does not exist! (SGSI目录不存在！)"
             echo "Current directory contents (当前目录内容):"
@@ -411,39 +456,51 @@ jobs:
             exit 1
           fi
           
-          # Create output filename (创建输出文件名)
+          if [[ -z "$(ls -A SGSI/ 2>/dev/null)" ]]; then
+            echo "::error::❌ SGSI directory is empty! (SGSI目录为空！)"
+            exit 1
+          fi
+          
+          # 创建输出文件名
           output_file="${{ steps.config.outputs.pack_sgsi }}"
           
-          # Fix file ownership before packaging (打包前修复文件所有权)
+          # 修复文件所有权
           echo "Fixing file ownership (修复文件所有权)..."
           sudo chown -R $(id -u):$(id -g) SGSI/
+          sudo chmod -R 755 SGSI/
           
-          # Package files (打包文件)
+          # 打包文件，添加进度显示
           echo "Packaging SGSI to: $output_file"
-          if ! zip -r "$output_file" SGSI/*; then
+          if ! zip -r -q "$output_file" SGSI/*; then
             echo "::error::❌ Packaging failed! (打包失败！)"
             exit 1
           fi
           
-          # Prepare upload directory (准备上传目录)
-          mkdir -p "${GITHUB_WORKSPACE}/upload"
-          file_size=$(stat -c%s "$output_file")
-          max_size=2000000000  # 2GB
-          
-          # Check file size and split if needed (检查文件大小并在需要时分卷)
-          if [[ -z "$file_size" ]] || [[ "$file_size" -eq 0 ]]; then
-            echo "::error::❌ SGSI production failed or is empty (SGSI产出失败或为空)"
+          # 验证打包文件
+          if [[ ! -f "$output_file" ]]; then
+            echo "::error::❌ Output file was not created (输出文件未创建)"
             exit 1
           fi
           
-          echo "File size: $(numfmt --to=iec-i $file_size) (文件大小)"
+          file_size=$(stat -c%s "$output_file")
+          if [[ $file_size -eq 0 ]]; then
+            echo "::error::❌ Output file is empty (输出文件为空)"
+            exit 1
+          fi
           
+          echo "✅ Package created: $output_file ($(numfmt --to=iec-i $file_size))"
+          
+          # 准备上传目录
+          mkdir -p "${GITHUB_WORKSPACE}/upload"
+          max_size=2000000000  # 2GB
+          
+          # 检查文件大小并在需要时分卷
           if [[ $file_size -gt $max_size ]]; then
             echo "⚠️ File too large, splitting into parts (文件过大，进行分卷打包)..."
             split -b 1500m -d -a 1 "$output_file" "${output_file}_part"
-            # Move split files to upload directory (移动分卷文件到上传目录)
+            # 移动分卷文件到上传目录
             mv "${output_file}_part"* "${GITHUB_WORKSPACE}/upload/"
-            # Delete original large file (删除原始大文件)
+            # 删除原始大文件
             rm "$output_file"
             echo "Split file list (分卷文件列表):"
             ls -lh "${GITHUB_WORKSPACE}/upload"
@@ -452,37 +509,14 @@ jobs:
             mv "$output_file" "${GITHUB_WORKSPACE}/upload/"
           fi
           
-          # Ensure upload directory has content (确保上传目录有内容)
+          # 确保上传目录有内容
           echo "=== Upload directory contents (上传目录内容) ==="
-          ls -lh "${GITHUB_WORKSPACE}/upload" || true
+          ls -lh "${GITHUB_WORKSPACE}/upload" || { echo "❌ Upload directory is empty!"; exit 1; }
           echo "===================="
           
-          # Save upload directory path (保存上传目录路径)
+          # 保存上传目录路径
           echo "UPLOAD_DIR=${GITHUB_WORKSPACE}/upload" >> $GITHUB_ENV
              
-      - name: "Upload to WeTransfer"
-        id: upload_transfer  # 修改为 upload_transfer
-        if: steps.config.outputs.upload_wetransfer == 'true'
-        run: |
-          # 检查上传目录是否存在且非空
-          if [[ ! -d "${{ env.UPLOAD_DIR }}" || -z "$(ls -A ${{ env.UPLOAD_DIR }})" ]]; then
-            echo "::warning::ℹ️ 上传目录为空或不存在，跳过WeTransfer上传"
-            exit 0
-          fi
-          
-          # 上传文件到transfer.sh（7天有效），支持多文件
-          response=$(curl -s -F "file=@${{ env.UPLOAD_DIR }}/*" "https://transfer.sh/?expire=7d")
-          
-          # 处理上传错误（非零exit code或响应含"error"）
-          if [[ $? -ne 0 || -z "$response" || "$response" == *"error"* ]]; then
-            echo "::warning::⚠️ WeTransfer上传失败，响应：$response"
-            exit 0
-          fi
-          
-          # 保存链接到输出变量（用于Release描述）
-          echo "link=$response" >> $GITHUB_OUTPUT
-          echo "✅ WeTransfer上传成功，链接（7天有效）：$response"
-          
       - name: "Upload to GitHub Artifacts"
         uses: actions/upload-artifact@v4
         with:
@@ -557,7 +591,7 @@ jobs:
           tag_name: "${{ steps.release_tag.outputs.release_tag }}"
           # 上传所有打包后的文件
           files: "${{ env.UPLOAD_DIR }}/*"
-          # 发布描述（更新WeTransfer步骤ID引用）
+          # 发布描述
           body: |
             ##  📱 SGSI Build Information (构建信息)
             
@@ -572,7 +606,6 @@ jobs:
             - **原构建日期 (Source Build Date):** ${{ steps.release_tag.outputs.formatted_build_date }}
             
             ### 下载链接 (Download Links)
-            - **WeTransfer（7天有效）:** ${{ steps.upload_transfer.outputs.link }}
             - **GitHub Artifacts（30天保留）:** [点击下载](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
             
             ### 其他信息 (Other Info)
