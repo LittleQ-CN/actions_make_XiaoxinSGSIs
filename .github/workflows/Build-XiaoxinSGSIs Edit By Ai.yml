@@ -35,8 +35,7 @@ jobs:
           echo "make_smartisanos=$(jq -r '.make_smartisanos' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_zui=$(jq -r '.make_zui' sgsi.json)" >> $GITHUB_OUTPUT
           echo "make_super=$(jq -r '.make_super' sgsi.json)" >> $GITHUB_OUTPUT
-          echo "upload_transfer=$(jq -r '.upload_transfer' sgsi.json)" >> $GITHUB_OUTPUT
-          echo "upload_artifact=$(jq -r '.upload_artifact' sgsi.json)" >> $GITHUB_OUTPUT
+          # 已删除：upload_transfer 和 upload_artifact 变量
           
       - name: Download XiaoxinSGSIs Tools
         run: |
@@ -64,64 +63,34 @@ jobs:
            
       - name: Initialization environment
         run: |
-          # 解压工具包
           sudo tar -xf SGSI-build-tool.tar
-          
-          # 替换setup.sh
           sudo rm -rf SGSI-build-tool/10/setup.sh
           sudo mv bin/setup.sh SGSI-build-tool/10/
-          
           cd SGSI-build-tool/10
-          
-          # 设置执行权限
-          sudo find . -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
-          sudo chmod +x bin/mke2fs bin/e2fsdroid 2>/dev/null || true
-          
-          # 运行环境设置
           sudo bash setup.sh
            
       - name: Download Rom
-        run: |
-          echo "📥 Downloading ROM from ${{ steps.var.outputs.rom_url }}"
-          cd SGSI-build-tool/10/tmp
-          sudo wget -c "${{ steps.var.outputs.rom_url }}" -O "${{ steps.var.outputs.rom_name }}" || exit 1
-          
-          # 检查文件是否下载成功
-          if [ ! -f "${{ steps.var.outputs.rom_name }}" ]; then
-            echo "❌ ROM下载失败: ${{ steps.var.outputs.rom_name }}"
-            exit 1
-          fi
-          
-          # 检查文件大小
-          file_size=$(sudo stat -c%s "${{ steps.var.outputs.rom_name }}" 2>/dev/null || echo "0")
-          echo "📦 ROM文件大小: $file_size 字节"
-          
-          if [ "$file_size" -lt 1000000 ]; then
-            echo "❌ 下载的文件太小，可能下载失败"
-            exit 1
-          fi
+        run: sudo wget -c "${{ steps.var.outputs.rom_url }}" -O "SGSI-build-tool/10/tmp/${{ steps.var.outputs.rom_name }}"
        
       - name: Build Super SGSI
         if: ${{ steps.var.outputs.make_super == 'true' }}
         run: |
           cd SGSI-build-tool/10
-          sudo sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
+          sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' make.sh
        
       - name: Make MIUI SGSI
         if: ${{ steps.var.outputs.make_miui == 'true' }}
         run: |
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
-          sudo cp ../../fix/MIUI.sh fixbug/fixbug.sh
-          sudo chmod +x fixbug/fixbug.sh
+          cp ../../fix/MIUI.sh fixbug/fixbug.sh
            
       - name: Make Flyme SGSI
         if: ${{ steps.var.outputs.make_flyme == 'true' }}
         run: |
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
-          sudo cp ../../fix/Flyme.sh fixbug/fixbug.sh
-          sudo chmod +x fixbug/fixbug.sh
+          cp ../../fix/Flyme.sh fixbug/fixbug.sh
            
       - name: Make ColorOS SGSI
         if: ${{ steps.var.outputs.make_coloros == 'true' }}
@@ -129,72 +98,63 @@ jobs:
           cd SGSI-build-tool/10
           sudo python3 oppo_ozip/ozipdecrypt.py "tmp/${{ steps.var.outputs.rom_name }}"
           sudo rm -rf "tmp/${{ steps.var.outputs.rom_name }}" fixbug/fixbug.sh
-          sudo cp ../../fix/ColorOS.sh fixbug/fixbug.sh
-          sudo chmod +x fixbug/fixbug.sh
+          cp ../../fix/ColorOS.sh fixbug/fixbug.sh
            
       - name: Make H2OS SGSI
         if: ${{ steps.var.outputs.make_h2os == 'true' }}
         run: |
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
-          sudo cp ../../fix/H2OS.sh fixbug/fixbug.sh
-          sudo chmod +x fixbug/fixbug.sh
+          cp ../../fix/H2OS.sh fixbug/fixbug.sh
            
       - name: Make SmartisanOS SGSI
         if: ${{ steps.var.outputs.make_smartisanos == 'true' }}
         run: |
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
-          sudo cp ../../fix/SmartisanOS.sh fixbug/fixbug.sh
-          sudo chmod +x fixbug/fixbug.sh
+          cp ../../fix/SmartisanOS.sh fixbug/fixbug.sh
            
       - name: Make ZUI SGSI
         if: ${{ steps.var.outputs.make_zui == 'true' }}
         run: |
           cd SGSI-build-tool/10
           sudo rm -rf fixbug/fixbug.sh
-          sudo cp ../../fix/ZUI.sh fixbug/fixbug.sh
-          sudo chmod +x fixbug/fixbug.sh
+          cp ../../fix/ZUI.sh fixbug/fixbug.sh
             
       - name: Generate SGSI
         run: |
           cd SGSI-build-tool/10
           
-          # 检查ROM文件是否存在
-          if [ ! -f "tmp/${{ steps.var.outputs.rom_name }}" ]; then
-            echo "❌ ROM文件不存在: tmp/${{ steps.var.outputs.rom_name }}"
-            echo "当前tmp目录内容:"
-            sudo ls -la tmp/
-            exit 1
-          fi
+          # 修复关键文件缺失问题
+          cp -r ../../bin/. bin/
+          cp -r ../../make/. .
+          cp -r ../../tools/new_fs/. new_fs/
+          cp -r ../../tools/add_lib/. add_lib/
+          cp -r ../../tools/add_lib64/. add_lib64/
+          cp -r ../../tools/mergefs/. mergefs/
+          cp -r ../../tools/cp_phh/. cp_phh/
+          cp -r ../../tools/phh_lib64/. phh_lib64/
+          cp -r ../../tools/phh_lib/. phh_lib/
           
-          # 只复制必要的配置和二进制文件
-          sudo cp -r ../../bin/. bin/ 2>/dev/null || echo "bin目录复制完成或已存在"
-          sudo cp -r ../../make/. . 2>/dev/null || echo "make目录复制完成或已存在"
+          # 设置执行权限
+          chmod +x SGSI.sh makeimg.sh dynamic_SGSI.sh oppo.sh make.sh
+          chmod +x bin/mke2fs bin/e2fsdroid
+          chmod +x new_fs/*.sh
+          chmod +x add_lib/*.sh
+          chmod +x add_lib64/*.sh
+          chmod +x mergefs/*.sh
+          chmod +x phh_lib64/*.sh
           
-          # 确保所有脚本都有执行权限
-          sudo find . -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
-          sudo chmod +x bin/mke2fs bin/e2fsdroid 2>/dev/null || true
-          
-          # 使用非交互模式运行构建
-          echo "🏗️ 开始构建SGSI..."
           sudo bash make.sh
 
       - name: Make Patch Module
         run: |
           cd SGSI-build-tool/10
           
-          # 检查out目录是否存在
-          if [ ! -d "out" ]; then
-            echo "❌ out目录不存在，构建可能失败"
-            exit 1
-          fi
-          
           # 确保out目录存在
           if [ -d "out/vendor" ]; then
-            sudo zip -r Patchmod.zip out/vendor/app/* out/vendor/bin/* out/vendor/etc/* out/vendor/lib/* out/vendor/lib64/* out/vendor/overlay/*
-            sudo mv Patchmod.zip SGSI/
-            echo "✅ Patchmod创建成功"
+            zip -r Patchmod.zip out/vendor/app/* out/vendor/bin/* out/vendor/etc/* out/vendor/lib/* out/vendor/lib64/* out/vendor/overlay/*
+            mv Patchmod.zip SGSI/
           else
             echo "::warning::out/vendor directory not found (out/vendor目录不存在)"
           fi
@@ -206,11 +166,10 @@ jobs:
           # 确保Patch目录存在
           if [ -d "../../Patch" ]; then
             cd ../../Patch
-            sudo zip -r Patch1.zip Patch1/*
-            sudo zip -r Patch2.zip Patch2/*
-            sudo zip -r Patch3.zip Patch3/*
-            sudo mv Patch1.zip Patch2.zip Patch3.zip ../SGSI-build-tool/10/SGSI/
-            echo "✅ Patch文件创建成功"
+            zip -r Patch1.zip Patch1/*
+            zip -r Patch2.zip Patch2/*
+            zip -r Patch3.zip Patch3/*
+            mv Patch1.zip Patch2.zip Patch3.zip ../SGSI-build-tool/10/SGSI/
           else
             echo "::warning::Patch directory not found (Patch目录不存在)"
           fi
@@ -221,35 +180,15 @@ jobs:
           
           # 确保SGSI目录存在
           if [ -d "SGSI" ]; then
-            echo "📦 打包SGSI文件..."
-            sudo 7za a -t7z -r "${{ steps.var.outputs.pack_sgsi }}" SGSI/*
-            echo "✅ 打包完成: ${{ steps.var.outputs.pack_sgsi }}"
-            
-            # 显示文件信息
-            echo "📊 打包文件信息:"
-            sudo ls -lh "${{ steps.var.outputs.pack_sgsi }}"
+            7za a -t7z -r "${{ steps.var.outputs.pack_sgsi }}" SGSI/*
           else
             echo "::error::SGSI directory not found (SGSI目录不存在)"
-            echo "当前目录内容:"
-            sudo ls -la
             exit 1
           fi
 
-      - name: Upload SGSI to WeTransfer
-        if: ${{ steps.var.outputs.upload_transfer == 'true' }}
-        run: |
-          cd SGSI-build-tool/10
-          if [ -f "${{ steps.var.outputs.pack_sgsi }}" ]; then
-            echo "📤 上传到WeTransfer..."
-            curl -sL https://git.io/file-transfer | sh
-            sudo chmod +x transfer
-            sudo ./transfer wet "${{ steps.var.outputs.pack_sgsi }}"
-          else
-            echo "❌ 打包文件不存在，无法上传"
-          fi
-          
+      # 已删除：Upload SGSI to WeTransfer 步骤
+      
       - name: Upload SGSI to Artifact
-        if: ${{ steps.var.outputs.upload_artifact == 'true' }}
         uses: actions/upload-artifact@v4
         with: 
           name: XiaoxinSGSIs
