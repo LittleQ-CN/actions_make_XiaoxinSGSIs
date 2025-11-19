@@ -1,7 +1,7 @@
 {
-  "rom_url": "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/V12.0.3.0.QCOCNXM/ginkgo_images_V12.0.3.0.QCOCNXM_20201117.0000.00_10.0_cn_fe1f2115e7.tgz",
-  "rom_name": "ginkgo_images_V12.0.3.0.QCOCNXM_20201117.0000.00_10.0_cn_fe1f2115e7",
-  "pack_sgsi": "ginkgo_images_V12.0.3.0.QCOCNXM_20201117.AB_TEST_10.0_cn.zip",
+  "rom_url": "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/V12.0.3.0.QCOCNXM/miui_GINKGO_V12.0.3.0.QCOCNXM_e41fdaaac9_10.0.zip",
+  "rom_name": "miui_GINKGO_V12.0.3.0.QCOCNXM_e41fdaaac9_10.0.zip",
+  "pack_sgsi": "miui_GINKGO_V12.0.3.0.QCOCNXM_e41fdaaac9_AB_TEST_10.0_cn.zip",
   "make_miui": true,
   "make_flyme": false,
   "make_coloros": false,
