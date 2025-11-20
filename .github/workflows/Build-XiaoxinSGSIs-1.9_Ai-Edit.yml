@@ -26,10 +26,15 @@ jobs:
        
       - name: "Check Config Status (检查配置文件)"
         run: |
+          echo "=== 配置文件检查 ==="
           if [[ ! -f "sgsi.json" ]]; then
             echo "::error::❌ Missing sgsi.json config file (缺少sgsi.json配置文件)"
             exit 1
           fi
+          
+          echo "✅ sgsi.json 文件存在"
+          echo "文件内容:"
+          cat sgsi.json
           
           if [[ -f "SGSI-build-tool/10/sgsi.sh" ]]; then
             echo "✅ Detected configured sgsi.sh file (检测到已配置sgsi.sh文件)"
@@ -40,11 +45,17 @@ jobs:
       - name: "Parse Config Variables (解析配置变量)"
         id: config
         run: |
+          echo "=== 解析配置文件 ==="
           rom_url=$(jq -r '.rom_url // empty' sgsi.json)
           if [[ -z "$rom_url" ]]; then
             echo "::error::❌ Missing rom_url field in sgsi.json (sgsi.json中缺少rom_url字段)"
             exit 1
           fi
+          
+          echo "📋 配置信息:"
+          echo "ROM URL: $rom_url"
+          echo "ROM Name: $(jq -r '.rom_name // "unknown_rom"' sgsi.json)"
+          echo "Pack SGSI: $(jq -r '.pack_sgsi // "SGSI.zip"' sgsi.json)"
           
           {
             echo "rom_url=$rom_url"
@@ -61,11 +72,13 @@ jobs:
            
       - name: "Install Essential Tools (安装基础工具)"
         run: |
+          echo "=== 安装必要工具 ==="
           sudo apt-get update
           # 只安装最必要的工具
-          sudo apt-get install -y aria2 curl jq brotli android-sdk-libsparse-utils zip unzip python3
+          sudo apt-get install -y aria2 curl jq brotli android-sdk-libsparse-utils zip unzip python3 file
           sudo apt-get clean
           echo "✅ 基础工具安装完成"
+          echo "💾 安装后磁盘空间:"
           df -h
           
       - name: "Download Build Tools (下载构建工具)"
@@ -74,12 +87,19 @@ jobs:
           filename="SGSI-build-tool.tar"
           
           echo "🔧 Starting build tools download (开始下载构建工具)..."
+          echo "URL: $tool_url"
+          
           max_retries=5
           retry_delay=10
           
           for i in $(seq 1 $max_retries); do
+            echo "Attempt $i/$max_retries (尝试 $i/$max_retries)..."
+            
             if curl -fL -o "$filename" "$tool_url"; then
               echo "✅ Download successful (下载成功)"
+              echo "📦 文件信息:"
+              ls -lh "$filename"
+              file "$filename" || true
               break
             else
               echo "❌ Download failed (尝试 $i/$max_retries) (下载失败)"
@@ -93,9 +113,16 @@ jobs:
           
       - name: "Initialize Build Environment (初始化构建环境)"
         run: |
+          echo "=== 初始化构建环境 ==="
           echo "📂 Extracting build tools (解压构建工具)..."
+          
+          echo "💾 解压前磁盘空间:"
+          df -h
+          
           if ! sudo tar -xf SGSI-build-tool.tar; then
             echo "::error::❌ Failed to extract build tools (解压构建工具失败)"
+            echo "尝试检查文件完整性..."
+            file SGSI-build-tool.tar || true
             exit 1
           fi
           
@@ -104,18 +131,35 @@ jobs:
           echo "✅ Tar file removed to free space (已删除tar文件释放空间)"
           
           # 设置执行权限
+          echo "🔧 设置执行权限..."
           sudo find SGSI-build-tool -name "*.sh" -exec chmod +x {} \;
           
+          echo "📁 构建工具目录结构:"
+          ls -la SGSI-build-tool/ || echo "无法列出SGSI-build-tool目录"
+          ls -la SGSI-build-tool/10/ || echo "无法列出SGSI-build-tool/10目录"
+          
           echo "✅ Environment initialization complete (环境初始化完成)"
+          echo "💾 初始化后磁盘空间:"
           df -h
           
       - name: "Fix Toolchain Issues (修复工具链问题)"
         run: |
+          echo "=== 修复工具链问题 ==="
           cd SGSI-build-tool/10
+          
           echo "🛠️ Fixing binary compatibility (修复二进制兼容性)..."
           
           # 创建必要目录
           sudo mkdir -p bin
+          
+          echo "🔍 检查系统工具:"
+          for tool in brotli simg2img img2simg mke2fs e2fsdroid; do
+            if command -v $tool >/dev/null 2>&1; then
+              echo "✅ $tool: $(command -v $tool)"
+            else
+              echo "❌ $tool: not found"
+            fi
+          done
           
           # 只链接确实存在的工具
           for tool in brotli simg2img img2simg; do
@@ -138,11 +182,15 @@ jobs:
             echo "::warning::⚠️ mke2fs not found (未找到mke2fs)"
           fi
           
+          echo "📁 bin目录内容:"
+          ls -la bin/ || echo "bin目录不存在"
+          
           echo "✅ Essential binary tools linked (必需二进制工具链接完成)"
           cd ../..
           
       - name: "Fix Directory Permissions (修复目录权限)"
         run: |
+          echo "=== 修复目录权限 ==="
           echo "Fixing SGSI-build-tool directory permissions (修复SGSI-build-tool目录权限)..."
           sudo chown -R $(id -u):$(id -g) SGSI-build-tool
           sudo chmod -R 755 SGSI-build-tool
@@ -211,6 +259,7 @@ jobs:
             echo -e "\n🎉 Download completed (下载完成)"
             echo "📦 File info (文件信息): $(sudo ls -lh "$rom_path")"
             echo "📊 File size: $(numfmt --to=iec $file_size)"
+            echo "🔍 File type: $(file "$rom_path" || echo "unknown")"
           else
             echo "::error::❌ Download file not found (下载文件未找到)"
             exit 1
@@ -221,6 +270,7 @@ jobs:
 
       - name: "Configure ROM Specific Settings (配置ROM特定设置)"
         run: |
+          echo "=== 配置ROM特定设置 ==="
           echo "Starting ROM-specific configuration (开始配置ROM特定设置)..."
           
           # Determine ROM type (确定ROM类型)
@@ -275,10 +325,12 @@ jobs:
           
       - name: "Fix Script Syntax Errors (修复脚本语法错误)"
         run: |
+          echo "=== 修复脚本语法错误 ==="
           cd SGSI-build-tool/10
           
           echo "Checking and fixing SGSI.sh script errors (检查并修复SGSI.sh脚本错误)..."
           if [[ -f "SGSI.sh" ]]; then
+            echo "🔧 修复SGSI.sh语法..."
             sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/\[ -n "\1" ]/g' SGSI.sh
             sudo sed -i 's/==/=/g' SGSI.sh
             echo "✅ Script syntax errors fixed (已修复脚本语法错误)"
@@ -289,12 +341,15 @@ jobs:
           
       - name: "Prepare Build Files (准备构建文件)"
         run: |
+          echo "=== 准备构建文件 ==="
           echo "Preparing build scripts and tools (准备构建脚本和工具)..."
           
           # Copy custom build scripts (复制自定义构建脚本)
           if [[ -d "make" ]]; then
             echo "Moving build scripts (移动构建脚本)..."
             sudo cp -v make/*.sh SGSI-build-tool/10/
+          else
+            echo "ℹ️ make目录不存在"
           fi
           
           # Copy binary tools (复制二进制工具)
@@ -302,12 +357,15 @@ jobs:
             echo "Moving binary tools (移动二进制工具)..."
             sudo mkdir -p SGSI-build-tool/10/bin
             sudo cp -v bin/* SGSI-build-tool/10/bin/
+          else
+            echo "ℹ️ bin目录不存在"
           fi
           
           echo "✅ Build files preparation completed (构建文件准备完成)"
           
       - name: "Free Disk Space Before Build (构建前释放磁盘空间)"
         run: |
+          echo "=== 构建前释放磁盘空间 ==="
           echo "🧹 Freeing disk space before build (构建前释放磁盘空间)..."
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
@@ -319,6 +377,7 @@ jobs:
       - name: "Build SGSI Image (构建SGSI镜像)"
         id: build_sgsi
         run: |
+          echo "=== 构建SGSI镜像 ==="
           cd SGSI-build-tool/10
           
           echo "🏗️ Starting SGSI build (开始构建SGSI)..."
@@ -409,6 +468,7 @@ jobs:
            
       - name: "Clean Intermediate Files (清理中间文件)"
         run: |
+          echo "=== 清理中间文件 ==="
           echo "🧹 Cleaning intermediate files to free space (清理中间文件释放空间)..."
           # 删除ROM文件
           sudo rm -rf SGSI-build-tool/10/tmp/*
@@ -423,6 +483,37 @@ jobs:
           echo "✅ Intermediate files cleaned (中间文件已清理)"
           df -h
 
+      - name: "Debug: Check Patch Directory (调试: 检查补丁目录)"
+        run: |
+          echo "=== 调试: 检查补丁目录 ==="
+          echo "📁 当前工作目录: $(pwd)"
+          echo "📁 目录结构:"
+          ls -la
+          
+          if [[ -d "Patch" ]]; then
+            echo "✅ Patch目录存在"
+            echo "📁 Patch目录内容:"
+            ls -la Patch/
+            
+            for i in 1 2 3; do
+              patch_dir="Patch/Patch${i}"
+              if [[ -d "$patch_dir" ]]; then
+                echo "✅ $patch_dir 存在"
+                echo "📁 $patch_dir 内容:"
+                ls -la "$patch_dir"
+                file_count=$(find "$patch_dir" -type f | wc -l)
+                echo "📊 $patch_dir 文件数量: $file_count"
+              else
+                echo "❌ $patch_dir 不存在"
+              fi
+            done
+          else
+            echo "❌ Patch目录不存在"
+          fi
+          
+          echo "💾 当前磁盘空间:"
+          df -h
+
       - name: "Package Patches - Method 1 (ZIP打包)"
         id: package_patches_zip
         run: |
@@ -431,6 +522,8 @@ jobs:
           # 确保补丁目录存在
           if [[ ! -d "Patch" ]]; then
             echo "ℹ️ 未找到Patch目录，跳过补丁打包"
+            echo "patch_method=none" >> $GITHUB_OUTPUT
+            echo "patch_count=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -447,39 +540,57 @@ jobs:
             output_file="Patch${i}.zip"
             
             if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
-              echo "📦 打包补丁: $patch_dir → $output_file"
+              echo "📦 打包补丁 $i: $patch_dir → $output_file"
               
-              # 进入补丁目录进行打包，避免路径问题
-              if cd "$patch_dir" && zip -r -q "../$output_file" ./* && cd ../..; then
-                echo "✅ 补丁打包成功: $output_file ($(stat -c%s "$output_file" 2>/dev/null | numfmt --to=iec || echo "unknown") bytes)"
-                mv "$output_file" SGSI-build-tool/10/SGSI/ 2>/dev/null || sudo mv "$output_file" SGSI-build-tool/10/SGSI/
-                ((patch_count++))
+              # 检查补丁目录内容
+              echo "📁 补丁目录内容:"
+              ls -la "$patch_dir" || echo "无法列出补丁目录"
+              
+              # 使用更安全的方法打包
+              echo "🔧 开始打包..."
+              if (cd "$patch_dir" && zip -r "../$output_file" . -q); then
+                echo "✅ 补丁打包成功: $output_file"
+                # 检查生成的文件
+                if [[ -f "../$output_file" ]]; then
+                  file_size=$(stat -c%s "../$output_file" 2>/dev/null || echo "0")
+                  echo "📦 打包文件大小: $(numfmt --to=iec $file_size)"
+                  # 尝试移动文件
+                  if mv "../$output_file" "SGSI-build-tool/10/SGSI/" 2>/dev/null; then
+                    echo "✅ 文件移动成功"
+                    ((patch_count++))
+                  elif sudo mv "../$output_file" "SGSI-build-tool/10/SGSI/" 2>/dev/null; then
+                    echo "✅ 文件移动成功 (使用sudo)"
+                    ((patch_count++))
+                  else
+                    echo "⚠️ 无法移动文件 $output_file"
+                    # 清理文件
+                    rm -f "../$output_file" 2>/dev/null || true
+                  fi
+                else
+                  echo "❌ 打包文件未生成"
+                fi
               else
-                echo "::warning::⚠️ 补丁打包失败: $patch_dir"
+                echo "❌ 补丁打包失败: $patch_dir"
                 # 清理可能的不完整文件
-                rm -f "$output_file" 2>/dev/null || true
-                # 返回原始目录
-                cd ../..
+                rm -f "../$output_file" 2>/dev/null || true
               fi
             else
               echo "ℹ️ 补丁目录不存在或为空: $patch_dir"
             fi
+            echo "---"
           done
           
           echo "✅ 补丁文件打包完成，成功打包 $patch_count 个补丁"
-          if [[ $patch_count -gt 0 ]]; then
-            echo "移动后的补丁文件:"
-            ls -lh SGSI-build-tool/10/SGSI/Patch*.zip 2>/dev/null || echo "未找到补丁文件"
-          fi
-          
-          echo "💾 Disk space after patch packaging (补丁打包后磁盘空间):"
-          df -h
           
           # 保存结果
           echo "patch_method=zip" >> $GITHUB_OUTPUT
           echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
+          
+          echo "💾 打包后磁盘空间:"
+          df -h
 
       - name: "Package Patches - Method 2 (文件复制)"
+        id: package_patches_copy
         if: steps.package_patches_zip.outputs.patch_count == '0'
         run: |
           echo "=== 方法2: 直接复制补丁文件 (ZIP打包失败后使用) ==="
@@ -487,6 +598,8 @@ jobs:
           # 检查补丁目录是否存在
           if [[ ! -d "Patch" ]]; then
             echo "ℹ️ 未找到Patch目录，跳过补丁处理"
+            echo "patch_method=none" >> $GITHUB_OUTPUT
+            echo "patch_count=0" >> $GITHUB_OUTPUT
             exit 0
           fi
           
@@ -502,16 +615,27 @@ jobs:
             patch_dir="Patch/Patch${i}"
             if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
               echo "📁 复制补丁目录: $patch_dir"
-              # 直接复制目录内容
-              if cp -r "$patch_dir" "SGSI-build-tool/10/SGSI/" 2>/dev/null || sudo cp -r "$patch_dir" "SGSI-build-tool/10/SGSI/" 2>/dev/null; then
+              # 直接复制目录内容到SGSI目录
+              target_dir="SGSI-build-tool/10/SGSI/Patch${i}"
+              mkdir -p "$target_dir"
+              
+              echo "🔧 开始复制文件..."
+              if cp -r "$patch_dir"/* "$target_dir"/ 2>/dev/null; then
                 echo "✅ 补丁 $i 复制成功"
+                ((patch_count++))
+              elif sudo cp -r "$patch_dir"/* "$target_dir"/ 2>/dev/null; then
+                echo "✅ 补丁 $i 复制成功 (使用sudo)"
                 ((patch_count++))
               else
                 echo "⚠️ 补丁 $i 复制失败"
+                # 检查目标目录
+                echo "📁 目标目录状态:"
+                ls -la "$target_dir" 2>/dev/null || echo "目标目录不存在"
               fi
             else
               echo "ℹ️ 补丁目录 $patch_dir 不存在或为空"
             fi
+            echo "---"
           done
           
           echo "补丁处理完成: $patch_count 个成功"
@@ -520,23 +644,36 @@ jobs:
           # 保存结果
           echo "patch_method=copy" >> $GITHUB_OUTPUT
           echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
+          
+          echo "💾 复制后磁盘空间:"
+          df -h
 
       - name: "Package Output Files (打包输出文件)"
         run: |
+          echo "=== 打包输出文件 ==="
           cd SGSI-build-tool/10
           
-          echo "=== Packaging step (打包步骤) ==="
+          echo "📁 当前目录: $(pwd)"
+          echo "📁 目录内容:"
+          ls -la
           
           # 验证SGSI目录存在且有内容
           if [[ ! -d "SGSI" ]]; then
             echo "::error::❌ SGSI directory does not exist! (SGSI目录不存在！)"
+            echo "📁 当前目录内容:"
+            ls -la
             exit 1
           fi
           
           if [[ -z "$(ls -A SGSI/ 2>/dev/null)" ]]; then
             echo "::error::❌ SGSI directory is empty! (SGSI目录为空！)"
+            echo "📁 SGSI目录内容:"
+            ls -la SGSI/ || echo "无法列出SGSI目录"
             exit 1
           fi
+          
+          echo "📁 SGSI目录内容:"
+          ls -la SGSI/
           
           # 创建输出文件名
           output_file="${{ steps.config.outputs.pack_sgsi }}"
@@ -548,9 +685,16 @@ jobs:
           
           # 打包文件
           echo "Packaging SGSI to: $output_file"
+          echo "💾 打包前磁盘空间:"
+          df -h
+          
           if ! zip -r -q "$output_file" SGSI/*; then
             echo "::error::❌ Packaging failed! (打包失败！)"
-            exit 1
+            echo "尝试使用详细模式重新打包..."
+            if ! zip -r "$output_file" SGSI/*; then
+              echo "::error::❌ 详细模式打包也失败"
+              exit 1
+            fi
           fi
           
           # 验证打包文件
