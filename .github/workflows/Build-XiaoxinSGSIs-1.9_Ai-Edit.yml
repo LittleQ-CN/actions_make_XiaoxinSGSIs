@@ -606,8 +606,11 @@ jobs:
           echo "💾 当前磁盘空间:"
           df -h
           
-          # 创建目标目录
-          mkdir -p SGSI-build-tool/10/SGSI/
+          # 先修复SGSI目录的权限
+          echo "🔧 修复SGSI目录权限..."
+          sudo mkdir -p SGSI-build-tool/10/SGSI/
+          sudo chown -R $(id -u):$(id -g) SGSI-build-tool/10/SGSI/
+          sudo chmod -R 755 SGSI-build-tool/10/SGSI/
           
           # 尝试简单的文件复制而不是打包
           patch_count=0
@@ -615,7 +618,8 @@ jobs:
             patch_dir="Patch/Patch${i}"
             if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
               echo "📁 复制补丁目录: $patch_dir"
-              # 直接复制目录内容到SGSI目录
+              
+              # 创建目标目录（不使用sudo，因为我们已经修复了权限）
               target_dir="SGSI-build-tool/10/SGSI/Patch${i}"
               mkdir -p "$target_dir"
               
@@ -623,14 +627,20 @@ jobs:
               if cp -r "$patch_dir"/* "$target_dir"/ 2>/dev/null; then
                 echo "✅ 补丁 $i 复制成功"
                 ((patch_count++))
-              elif sudo cp -r "$patch_dir"/* "$target_dir"/ 2>/dev/null; then
-                echo "✅ 补丁 $i 复制成功 (使用sudo)"
-                ((patch_count++))
               else
-                echo "⚠️ 补丁 $i 复制失败"
-                # 检查目标目录
-                echo "📁 目标目录状态:"
-                ls -la "$target_dir" 2>/dev/null || echo "目标目录不存在"
+                echo "⚠️ 补丁 $i 复制失败，检查权限..."
+                # 检查源目录和目标目录权限
+                echo "📁 源目录权限: $(ls -ld "$patch_dir" 2>/dev/null || echo "无法访问")"
+                echo "📁 目标目录权限: $(ls -ld "$target_dir" 2>/dev/null || echo "无法访问")"
+                
+                # 尝试使用tar来保留权限
+                echo "🔄 尝试使用tar复制..."
+                if (cd "$patch_dir" && tar cf - . | (cd "../$target_dir" && tar xf -)); then
+                  echo "✅ 补丁 $i 复制成功 (使用tar)"
+                  ((patch_count++))
+                else
+                  echo "❌ 补丁 $i 所有复制方法都失败"
+                fi
               fi
             else
               echo "ℹ️ 补丁目录 $patch_dir 不存在或为空"
