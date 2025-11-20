@@ -337,11 +337,45 @@ jobs:
           echo "💾 Disk space after build (构建后磁盘空间):"
           df -h
 
-      - name: Fix Patch Directory Permissions (修复补丁目录权限)
+      - name: Debug Patch Directory Structure (调试补丁目录结构)
         run: |
-          echo "=== Fix Patch Directory Permissions (修复补丁目录权限) ==="
+          echo "=== Debug Patch Directory Structure (调试补丁目录结构) ==="
           
-          # Fix permissions for all patch directories
+          echo "📁 Current working directory (当前工作目录):"
+          pwd
+          
+          echo "📁 Root directory structure (根目录结构):"
+          ls -la
+          
+          echo "📁 Patch directory structure (补丁目录结构):"
+          if [[ -d "Patch" ]]; then
+            ls -la Patch/
+            for i in 1 2 3; do
+              patch_dir="Patch/Patch${i}"
+              if [[ -d "$patch_dir" ]]; then
+                echo "📁 Patch${i} directory contents (Patch${i} 目录内容):"
+                ls -la "$patch_dir"
+                echo "📊 Patch${i} file count (文件数量): $(find "$patch_dir" -type f | wc -l)"
+              else
+                echo "❌ Patch${i} directory not found (Patch${i} 目录不存在)"
+              fi
+            done
+          else
+            echo "❌ Patch directory not found (补丁目录不存在)"
+          fi
+          
+          echo "🔍 Checking SGSI directory permissions (检查SGSI目录权限):"
+          if [[ -d "SGSI-build-tool/10/SGSI" ]]; then
+            ls -la SGSI-build-tool/10/SGSI/
+          else
+            echo "SGSI directory does not exist yet (SGSI目录尚不存在)"
+          fi
+
+      - name: Fix All Permissions (修复所有权限)
+        run: |
+          echo "=== Fix All Permissions (修复所有权限) ==="
+          
+          # Fix patch directory permissions
           for patch_num in 1 2 3; do
             patch_dir="Patch/Patch${patch_num}"
             if [[ -d "$patch_dir" ]]; then
@@ -352,7 +386,13 @@ jobs:
             fi
           done
           
-          echo "✅ All patch directory permissions fixed (所有补丁目录权限已修复)"
+          # Ensure SGSI directory exists and has correct permissions
+          echo "🔧 Creating and fixing SGSI directory permissions (创建并修复SGSI目录权限)..."
+          sudo mkdir -p SGSI-build-tool/10/SGSI/
+          sudo chown -R $(id -u):$(id -g) SGSI-build-tool/10/SGSI/
+          sudo chmod -R 755 SGSI-build-tool/10/SGSI/
+          
+          echo "✅ All permissions fixed (所有权限已修复)"
 
       - name: Process Patch Files (处理补丁文件)
         id: process_patches
@@ -371,49 +411,96 @@ jobs:
           fi
           
           patch_count=0
+          failed_patches=0
           
-          # Process each patch directory with better error handling
+          # Process each patch directory with comprehensive error handling
           for patch_num in 1 2 3; do
             patch_dir="Patch/Patch${patch_num}"
             if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
               echo "📦 Processing Patch${patch_num} (处理补丁${patch_num})..."
               
-              # Ensure SGSI directory exists
-              sudo mkdir -p SGSI-build-tool/10/SGSI/
-              
-              # Method 1: Direct copy without zipping (more reliable)
+              # Create target directory
               target_dir="SGSI-build-tool/10/SGSI/Patch${patch_num}"
-              echo "📁 Copying $patch_dir to $target_dir (复制补丁目录)..."
+              echo "📁 Target directory: $target_dir (目标目录)"
               
-              if sudo cp -r "$patch_dir" "$target_dir"; then
+              # Remove existing target directory to avoid conflicts
+              if [[ -d "$target_dir" ]]; then
+                echo "🗑️ Removing existing target directory (删除现有目标目录)..."
+                sudo rm -rf "$target_dir"
+              fi
+              
+              # Method 1: Simple copy with detailed error reporting
+              echo "🔄 Attempting simple copy (尝试简单复制)..."
+              if cp -r "$patch_dir" "$target_dir" 2>&1; then
                 ((patch_count++))
                 echo "✅ Patch${patch_num} copied successfully (补丁${patch_num}复制成功)"
               else
-                echo "⚠️ Failed to copy Patch${patch_num}, trying alternative method (复制失败，尝试替代方法)..."
+                echo "⚠️ Simple copy failed, trying with sudo (简单复制失败，尝试使用sudo)..."
                 
-                # Alternative method: Use tar for copying
-                if (cd "$(dirname "$patch_dir")" && sudo tar cf - "$(basename "$patch_dir")") | (cd "SGSI-build-tool/10/SGSI/" && sudo tar xf -); then
+                # Method 2: Copy with sudo
+                if sudo cp -r "$patch_dir" "$target_dir" 2>&1; then
                   ((patch_count++))
-                  echo "✅ Patch${patch_num} copied using tar (补丁${patch_num}通过tar复制成功)"
+                  echo "✅ Patch${patch_num} copied with sudo (补丁${patch_num}使用sudo复制成功)"
                 else
-                  echo "❌ All copy methods failed for Patch${patch_num} (所有复制方法都失败)"
+                  echo "⚠️ Sudo copy failed, trying rsync (sudo复制失败，尝试rsync)..."
+                  
+                  # Method 3: Use rsync
+                  if rsync -av "$patch_dir/" "$target_dir/" 2>&1; then
+                    ((patch_count++))
+                    echo "✅ Patch${patch_num} copied with rsync (补丁${patch_num}使用rsync复制成功)"
+                  else
+                    echo "⚠️ Rsync failed, trying tar (rsync失败，尝试tar)..."
+                    
+                    # Method 4: Use tar for copying
+                    if (cd "$(dirname "$patch_dir")" && tar cf - "$(basename "$patch_dir")") | (cd "SGSI-build-tool/10/SGSI/" && tar xf -) 2>&1; then
+                      ((patch_count++))
+                      echo "✅ Patch${patch_num} copied using tar (补丁${patch_num}通过tar复制成功)"
+                    else
+                      echo "❌ All copy methods failed for Patch${patch_num} (所有复制方法都失败)"
+                      ((failed_patches++))
+                      
+                      # Debug information
+                      echo "🔍 Debug information for Patch${patch_num}:"
+                      echo "Source: $patch_dir"
+                      echo "Target: $target_dir"
+                      echo "Source exists: $(test -d "$patch_dir" && echo "Yes" || echo "No")"
+                      echo "Target parent exists: $(test -d "$(dirname "$target_dir")" && echo "Yes" || echo "No")"
+                      echo "Source permissions: $(ls -ld "$patch_dir" 2>/dev/null || echo "N/A")"
+                      echo "Target parent permissions: $(ls -ld "$(dirname "$target_dir")" 2>/dev/null || echo "N/A")"
+                    fi
+                  fi
                 fi
               fi
+              
+              # Verify the copy was successful
+              if [[ -d "$target_dir" ]] && [[ -n "$(ls -A "$target_dir" 2>/dev/null)" ]]; then
+                echo "✅ Patch${patch_num} verification passed (补丁${patch_num}验证通过)"
+              else
+                echo "❌ Patch${patch_num} verification failed (补丁${patch_num}验证失败)"
+                ((failed_patches++))
+              fi
+              
             else
               echo "ℹ️ Patch${patch_num} directory not found or empty (补丁${patch_num}目录不存在或为空)"
             fi
+            echo "---"
           done
           
           echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
-          echo "✅ Patch processing completed: $patch_count patches (补丁处理完成: $patch_count 个补丁)"
+          echo "failed_patches=$failed_patches" >> $GITHUB_OUTPUT
+          
+          echo "📊 Patch processing summary (补丁处理摘要):"
+          echo "✅ Successful: $patch_count"
+          echo "❌ Failed: $failed_patches"
           
           # Show final directory structure
           echo "📁 Final SGSI directory structure (最终SGSI目录结构):"
-          ls -la SGSI-build-tool/10/SGSI/ || echo "Cannot list SGSI directory"
+          ls -la SGSI-build-tool/10/SGSI/ 2>/dev/null || echo "Cannot list SGSI directory"
           
           df -h
 
       - name: Create Final Package (创建最终包)
+        if: steps.process_patches.outputs.failed_patches == '0'
         run: |
           echo "=== Create Final Package (创建最终包) ==="
           
@@ -490,6 +577,14 @@ jobs:
           echo "✅ Final packaging completed (最终打包完成)"
           df -h
 
+      - name: Skip Packaging Due to Patch Errors (由于补丁错误跳过打包)
+        if: steps.process_patches.outputs.failed_patches != '0'
+        run: |
+          echo "⚠️ Skipping final packaging due to patch errors (由于补丁错误跳过最终打包)"
+          echo "Failed patches: ${{ steps.process_patches.outputs.failed_patches }}"
+          mkdir -p upload
+          echo "UPLOAD_DIR=upload" >> $GITHUB_ENV
+
       - name: Create Release (创建发布)
         id: create_release
         run: |
@@ -536,6 +631,7 @@ jobs:
             - **Device Model:** ${{ steps.build_sgsi.outputs.model }}
             - **Build Date:** ${{ steps.build_sgsi.outputs.build_date }}
             - **Patches Applied:** ${{ steps.process_patches.outputs.patch_count }}
+            - **Patch Errors:** ${{ steps.process_patches.outputs.failed_patches }}
             
             ### Download
             Artifacts are available for download below.
@@ -551,5 +647,6 @@ jobs:
           echo "🏷️ Release: ${{ steps.create_release.outputs.release_tag }}"
           echo "📦 Artifacts: ${{ env.UPLOAD_DIR }}"
           echo "📊 Patches: ${{ steps.process_patches.outputs.patch_count }}"
+          echo "❌ Patch Errors: ${{ steps.process_patches.outputs.failed_patches }}"
           echo "📱 Device: ${{ steps.build_sgsi.outputs.model }}"
           echo "🤖 Android: ${{ steps.build_sgsi.outputs.android_version }}"
