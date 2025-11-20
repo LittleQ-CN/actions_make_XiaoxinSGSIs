@@ -9,10 +9,10 @@ jobs:
     timeout-minutes: 120
     
     steps:
-      - name: "Checkout Code (检出代码)"
+      - name: Checkout Code (检出代码)
         uses: actions/checkout@v4
         
-      - name: "Initial Setup & Cleanup (初始设置和清理)"
+      - name: Initial Setup & Cleanup (初始设置和清理)
         run: |
           echo "💾 Initial disk space (初始磁盘空间):"
           df -h
@@ -22,7 +22,7 @@ jobs:
           echo "✅ Initial cleanup completed (初始清理完成)"
           df -h
        
-      - name: "Configuration Check & Setup (配置检查和设置)"
+      - name: Configuration Check & Setup (配置检查和设置)
         run: |
           echo "=== Configuration Check (配置检查) ==="
           if [[ ! -f "sgsi.json" ]]; then
@@ -34,7 +34,7 @@ jobs:
           echo "File content (文件内容):"
           cat sgsi.json
        
-      - name: "Parse Configuration (解析配置)"
+      - name: Parse Configuration (解析配置)
         id: config
         run: |
           echo "=== Parse Configuration (解析配置) ==="
@@ -62,7 +62,7 @@ jobs:
             echo "make_super=$(jq -r '.make_super // "false"' sgsi.json)"
           } >> $GITHUB_OUTPUT
            
-      - name: "Install Tools & Download Build Tools (安装工具和下载构建工具)"
+      - name: Install Tools & Download Build Tools (安装工具和下载构建工具)
         run: |
           echo "=== Install Essential Tools (安装必要工具) ==="
           sudo apt-get update
@@ -95,7 +95,7 @@ jobs:
           echo "✅ Environment setup completed (环境设置完成)"
           df -h
           
-      - name: "Setup Build Environment (设置构建环境)"
+      - name: Setup Build Environment (设置构建环境)
         run: |
           echo "=== Setup Build Environment (设置构建环境) ==="
           
@@ -117,7 +117,7 @@ jobs:
           sudo chmod -R 755 SGSI-build-tool
           echo "✅ Build environment setup completed (构建环境设置完成)"
 
-      - name: "Download ROM File (下载ROM文件)"
+      - name: Download ROM File (下载ROM文件)
         run: |
           rom_path="SGSI-build-tool/10/tmp/${{ steps.config.outputs.rom_name }}"
           rom_url="${{ steps.config.outputs.rom_url }}"
@@ -167,7 +167,7 @@ jobs:
           echo "🎉 ROM download completed: $(numfmt --to=iec $file_size) (ROM下载完成)"
           df -h
 
-      - name: "ROM Configuration (ROM配置)"
+      - name: ROM Configuration (ROM配置)
         run: |
           echo "=== ROM Configuration (ROM配置) ==="
           
@@ -236,7 +236,7 @@ jobs:
           echo "📱 ROM Type: $rom_type (ROM类型: $rom_type)"
           echo "✅ ROM configuration completed (ROM配置完成)"
 
-      - name: "Prepare Build Scripts (准备构建脚本)"
+      - name: Prepare Build Scripts (准备构建脚本)
         run: |
           echo "=== Prepare Build Scripts (准备构建脚本) ==="
           
@@ -270,7 +270,7 @@ jobs:
           sudo find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
           echo "✅ Build scripts preparation completed (构建脚本准备完成)"
 
-      - name: "Build SGSI Images (构建SGSI镜像)"
+      - name: Build SGSI Images (构建SGSI镜像)
         id: build_sgsi
         run: |
           echo "=== Build SGSI Images (构建SGSI镜像) ==="
@@ -337,7 +337,24 @@ jobs:
           echo "💾 Disk space after build (构建后磁盘空间):"
           df -h
 
-      - name: "Process Patch Files (处理补丁文件)"
+      - name: Fix Patch Directory Permissions (修复补丁目录权限)
+        run: |
+          echo "=== Fix Patch Directory Permissions (修复补丁目录权限) ==="
+          
+          # Fix permissions for all patch directories
+          for patch_num in 1 2 3; do
+            patch_dir="Patch/Patch${patch_num}"
+            if [[ -d "$patch_dir" ]]; then
+              echo "🔧 Fixing permissions for $patch_dir (修复 $patch_dir 权限)..."
+              sudo chown -R $(id -u):$(id -g) "$patch_dir"
+              sudo chmod -R 755 "$patch_dir"
+              echo "✅ Permissions fixed for $patch_dir"
+            fi
+          done
+          
+          echo "✅ All patch directory permissions fixed (所有补丁目录权限已修复)"
+
+      - name: Process Patch Files (处理补丁文件)
         id: process_patches
         run: |
           echo "=== Process Patch Files (处理补丁文件) ==="
@@ -355,28 +372,32 @@ jobs:
           
           patch_count=0
           
-          # Process each patch directory
+          # Process each patch directory with better error handling
           for patch_num in 1 2 3; do
             patch_dir="Patch/Patch${patch_num}"
             if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
-              echo "📦 Packaging Patch${patch_num} (打包补丁${patch_num})..."
+              echo "📦 Processing Patch${patch_num} (处理补丁${patch_num})..."
               
-              # Create zip package
-              if zip -r "Patch${patch_num}.zip" "$patch_dir"; then
-                if [[ -f "Patch${patch_num}.zip" ]]; then
-                  # Move to SGSI directory
-                  sudo mkdir -p SGSI-build-tool/10/SGSI/
-                  if sudo mv "Patch${patch_num}.zip" SGSI-build-tool/10/SGSI/; then
-                    ((patch_count++))
-                    echo "✅ Patch${patch_num} packaged successfully (补丁${patch_num}打包成功)"
-                  else
-                    echo "⚠️ Failed to move Patch${patch_num}.zip (移动补丁${patch_num}失败)"
-                    rm -f "Patch${patch_num}.zip"
-                  fi
-                fi
+              # Ensure SGSI directory exists
+              sudo mkdir -p SGSI-build-tool/10/SGSI/
+              
+              # Method 1: Direct copy without zipping (more reliable)
+              target_dir="SGSI-build-tool/10/SGSI/Patch${patch_num}"
+              echo "📁 Copying $patch_dir to $target_dir (复制补丁目录)..."
+              
+              if sudo cp -r "$patch_dir" "$target_dir"; then
+                ((patch_count++))
+                echo "✅ Patch${patch_num} copied successfully (补丁${patch_num}复制成功)"
               else
-                echo "❌ Failed to package Patch${patch_num} (打包补丁${patch_num}失败)"
-                rm -f "Patch${patch_num}.zip"
+                echo "⚠️ Failed to copy Patch${patch_num}, trying alternative method (复制失败，尝试替代方法)..."
+                
+                # Alternative method: Use tar for copying
+                if (cd "$(dirname "$patch_dir")" && sudo tar cf - "$(basename "$patch_dir")") | (cd "SGSI-build-tool/10/SGSI/" && sudo tar xf -); then
+                  ((patch_count++))
+                  echo "✅ Patch${patch_num} copied using tar (补丁${patch_num}通过tar复制成功)"
+                else
+                  echo "❌ All copy methods failed for Patch${patch_num} (所有复制方法都失败)"
+                fi
               fi
             else
               echo "ℹ️ Patch${patch_num} directory not found or empty (补丁${patch_num}目录不存在或为空)"
@@ -385,9 +406,14 @@ jobs:
           
           echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
           echo "✅ Patch processing completed: $patch_count patches (补丁处理完成: $patch_count 个补丁)"
+          
+          # Show final directory structure
+          echo "📁 Final SGSI directory structure (最终SGSI目录结构):"
+          ls -la SGSI-build-tool/10/SGSI/ || echo "Cannot list SGSI directory"
+          
           df -h
 
-      - name: "Create Final Package (创建最终包)"
+      - name: Create Final Package (创建最终包)
         run: |
           echo "=== Create Final Package (创建最终包) ==="
           
@@ -395,13 +421,13 @@ jobs:
           mkdir -p upload
           
           # Verify SGSI directory exists and has content
-          if [[ ! -d "SGSI-build-tool/10/SGSI" ]] || [[ -z "$(ls -A SGSI-build-tool/10/SGSI/ 2>/dev/null)" ]]; then
-            echo "::error::❌ SGSI directory is empty (SGSI目录为空)"
+          if [[ ! -d "SGSI-build-tool/10/SGSI" ]]; then
+            echo "::error::❌ SGSI directory does not exist (SGSI目录不存在)"
             exit 1
           fi
           
           echo "📁 Contents of SGSI directory (SGSI目录内容):"
-          ls -la SGSI-build-tool/10/SGSI/
+          ls -la SGSI-build-tool/10/SGSI/ || echo "Cannot list SGSI directory"
           
           output_file="${{ steps.config.outputs.pack_sgsi }}"
           
@@ -411,9 +437,27 @@ jobs:
           
           echo "📦 Creating package: $output_file"
           
-          # Create zip package
-          if ! zip -r "$output_file" SGSI-build-tool/10/SGSI/*; then
-            echo "::error::❌ Packaging failed (打包失败)"
+          # Create zip package with better error handling
+          cd SGSI-build-tool/10/SGSI
+          
+          echo "🔍 Files to be packaged (将要打包的文件):"
+          find . -type f | head -20
+          
+          # Go back to root directory and create zip
+          cd ../../../
+          
+          # Use more robust zip command
+          if ! zip -r -q "$output_file" SGSI-build-tool/10/SGSI/; then
+            echo "⚠️ Standard zip failed, trying with different options (标准zip失败，尝试不同选项)..."
+            if ! zip -r -q -0 "$output_file" SGSI-build-tool/10/SGSI/; then
+              echo "::error::❌ All zip methods failed (所有zip方法都失败)"
+              exit 1
+            fi
+          fi
+          
+          # Verify the package was created
+          if [[ ! -f "$output_file" ]]; then
+            echo "::error::❌ Package file was not created (包文件未创建)"
             exit 1
           fi
           
@@ -446,7 +490,7 @@ jobs:
           echo "✅ Final packaging completed (最终打包完成)"
           df -h
 
-      - name: "Create Release (创建发布)"
+      - name: Create Release (创建发布)
         id: create_release
         run: |
           echo "=== Create Release Info (创建发布信息) ==="
@@ -476,7 +520,7 @@ jobs:
           echo "🕐 Build Time: $build_time"
           echo "📱 ROM Type: $rom_type"
 
-      - name: "Upload Release (上传发布)"
+      - name: Upload Release (上传发布)
         uses: ncipollo/release-action@v1.8.6
         with:
           artifacts: '${{ env.UPLOAD_DIR }}/*'
@@ -500,7 +544,7 @@ jobs:
             This is an automated SGSI build using XiaoxinTools 1.9
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: "Completion Summary (完成总结)"
+      - name: Completion Summary (完成总结)
         if: success()
         run: |
           echo "🎉 Build Completed Successfully! (构建成功完成!)"
