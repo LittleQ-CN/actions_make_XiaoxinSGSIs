@@ -1,7 +1,7 @@
 name: Build_XiaoxinSGSIs_Ai-Edit [1.9]
 
 on:
-  workflow_dispatch:  # 仅手动触发
+  workflow_dispatch:  # Manual trigger only / 仅手动触发
 
 jobs:
   build:
@@ -12,43 +12,39 @@ jobs:
       - name: "Checkout Code (检出代码)"
         uses: actions/checkout@v4
         
-      - name: "Initial Disk Space Check (初始磁盘空间检查)"
+      - name: "Initial Setup & Cleanup (初始设置和清理)"
         run: |
           echo "💾 Initial disk space (初始磁盘空间):"
           df -h
           echo "🧹 Starting aggressive cleanup (开始激进清理)..."
           sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /var/lib/apt/lists/* /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
           echo "✅ Initial cleanup completed (初始清理完成)"
           df -h
        
-      - name: "Check Config Status (检查配置文件)"
+      - name: "Configuration Check & Setup (配置检查和设置)"
         run: |
-          echo "=== 配置文件检查 ==="
+          echo "=== Configuration Check (配置检查) ==="
           if [[ ! -f "sgsi.json" ]]; then
             echo "::error::❌ Missing sgsi.json config file (缺少sgsi.json配置文件)"
             exit 1
           fi
           
-          echo "✅ sgsi.json 文件存在"
-          echo "文件内容:"
+          echo "✅ sgsi.json file exists (sgsi.json文件存在)"
+          echo "File content (文件内容):"
           cat sgsi.json
        
-      - name: "Parse Config Variables (解析配置变量)"
+      - name: "Parse Configuration (解析配置)"
         id: config
         run: |
-          echo "=== 解析配置文件 ==="
+          echo "=== Parse Configuration (解析配置) ==="
           rom_url=$(jq -r '.rom_url // empty' sgsi.json)
           if [[ -z "$rom_url" ]]; then
             echo "::error::❌ Missing rom_url field in sgsi.json (sgsi.json中缺少rom_url字段)"
             exit 1
           fi
           
-          echo "📋 配置信息:"
+          echo "📋 Configuration Info (配置信息):"
           echo "ROM URL: $rom_url"
           echo "ROM Name: $(jq -r '.rom_name // "unknown_rom"' sgsi.json)"
           echo "Pack SGSI: $(jq -r '.pack_sgsi // "SGSI.zip"' sgsi.json)"
@@ -66,678 +62,399 @@ jobs:
             echo "make_super=$(jq -r '.make_super // "false"' sgsi.json)"
           } >> $GITHUB_OUTPUT
            
-      - name: "Install Essential Tools (安装基础工具)"
+      - name: "Install Tools & Download Build Tools (安装工具和下载构建工具)"
         run: |
-          echo "=== 安装必要工具 ==="
+          echo "=== Install Essential Tools (安装必要工具) ==="
           sudo apt-get update
-          sudo apt-get install -y aria2 curl jq brotli android-sdk-libsparse-utils zip unzip python3 file rsync
+          sudo apt-get install -y aria2 curl jq zip unzip python3 file
           sudo apt-get clean
-          echo "✅ 基础工具安装完成"
-          echo "💾 安装后磁盘空间:"
-          df -h
           
-      - name: "Download Build Tools (下载构建工具)"
-        run: |
+          echo "📥 Downloading build tools (下载构建工具)..."
           tool_url="https://github.com/xiaoxindada/SGSI-build-tool/releases/download/v1.9/SGSI-build-tool.tar"
-          filename="SGSI-build-tool.tar"
-          
-          echo "🔧 Starting build tools download (开始下载构建工具)..."
-          echo "URL: $tool_url"
-          
           max_retries=5
-          retry_delay=10
           
           for i in $(seq 1 $max_retries); do
             echo "Attempt $i/$max_retries (尝试 $i/$max_retries)..."
-            
-            if curl -fL -o "$filename" "$tool_url"; then
+            if curl -fL -o "SGSI-build-tool.tar" "$tool_url"; then
               echo "✅ Download successful (下载成功)"
-              echo "📦 文件信息:"
-              ls -lh "$filename"
-              file "$filename" || true
               break
-            else
-              echo "❌ Download failed (尝试 $i/$max_retries) (下载失败)"
-              if [ $i -eq $max_retries ]; then
-                echo "::error::❌ Build tools download failed (构建工具下载失败)"
-                exit 1
-              fi
-              sleep $retry_delay
+            elif [ $i -eq $max_retries ]; then
+              echo "::error::❌ Build tools download failed (构建工具下载失败)"
+              exit 1
             fi
+            sleep 10
           done
           
-      - name: "Initialize Build Environment (初始化构建环境)"
-        run: |
-          echo "=== 初始化构建环境 ==="
           echo "📂 Extracting build tools (解压构建工具)..."
-          
-          echo "💾 解压前磁盘空间:"
-          df -h
-          
           if ! sudo tar -xf SGSI-build-tool.tar; then
             echo "::error::❌ Failed to extract build tools (解压构建工具失败)"
-            echo "尝试检查文件完整性..."
-            file SGSI-build-tool.tar || true
             exit 1
           fi
           
           rm -f SGSI-build-tool.tar
-          echo "✅ Tar file removed to free space (已删除tar文件释放空间)"
-          
-          echo "🔧 设置执行权限..."
-          sudo find SGSI-build-tool -name "*.sh" -exec chmod +x {} \;
-          
-          echo "📁 构建工具目录结构:"
-          ls -la SGSI-build-tool/ || echo "无法列出SGSI-build-tool目录"
-          ls -la SGSI-build-tool/10/ || echo "无法列出SGSI-build-tool/10目录"
-          
-          echo "✅ Environment initialization complete (环境初始化完成)"
-          echo "💾 初始化后磁盘空间:"
+          echo "✅ Environment setup completed (环境设置完成)"
           df -h
           
-      - name: "Fix Toolchain Issues (修复工具链问题)"
+      - name: "Setup Build Environment (设置构建环境)"
         run: |
-          echo "=== 修复工具链问题 ==="
-          cd SGSI-build-tool/10
+          echo "=== Setup Build Environment (设置构建环境) ==="
           
-          echo "🛠️ Fixing binary compatibility (修复二进制兼容性)..."
-          
-          sudo mkdir -p bin
-          
-          echo "🔍 检查系统工具:"
-          for tool in brotli simg2img img2simg mke2fs e2fsdroid; do
-            if command -v $tool >/dev/null 2>&1; then
-              echo "✅ $tool: $(command -v $tool)"
-            else
-              echo "❌ $tool: not found"
-            fi
-          done
-          
-          for tool in brotli simg2img img2simg; do
-            if command -v $tool >/dev/null 2>&1; then
-              sudo ln -sf "$(command -v $tool)" bin/$tool
-              echo "✅ Linked $tool from $(command -v $tool)"
-            else
-              echo "::warning::⚠️ Tool not found: $tool (未找到工具: $tool)"
-            fi
-          done
-          
-          if [ -f "/usr/sbin/mke2fs" ]; then
-            sudo ln -sf "/usr/sbin/mke2fs" bin/mke2fs
-            echo "✅ Linked mke2fs from /usr/sbin/mke2fs"
-          elif command -v mke2fs >/dev/null 2>&1; then
-            sudo ln -sf "$(command -v mke2fs)" bin/mke2fs
-            echo "✅ Linked mke2fs from $(command -v mke2fs)"
-          else
-            echo "::warning::⚠️ mke2fs not found (未找到mke2fs)"
+          # Remove existing setup script and replace with custom one
+          sudo rm -rf SGSI-build-tool/10/setup.sh
+          if [[ -f "bin/setup.sh" ]]; then
+            sudo mv bin/setup.sh SGSI-build-tool/10/
           fi
           
-          echo "📁 bin目录内容:"
-          ls -la bin/ || echo "bin目录不存在"
-          
-          echo "✅ Essential binary tools linked (必需二进制工具链接完成)"
+          # Run setup script
+          cd SGSI-build-tool/10
+          if [[ -f "setup.sh" ]]; then
+            sudo bash setup.sh
+          fi
           cd ../..
           
-      - name: "Fix Directory Permissions (修复目录权限)"
-        run: |
-          echo "=== 修复目录权限 ==="
-          echo "Fixing SGSI-build-tool directory permissions (修复SGSI-build-tool目录权限)..."
+          # Fix directory permissions
           sudo chown -R $(id -u):$(id -g) SGSI-build-tool
           sudo chmod -R 755 SGSI-build-tool
-          echo "✅ Directory permissions fixed (目录权限已修复)"
-          
+          echo "✅ Build environment setup completed (构建环境设置完成)"
+
       - name: "Download ROM File (下载ROM文件)"
         run: |
           rom_path="SGSI-build-tool/10/tmp/${{ steps.config.outputs.rom_name }}"
           rom_url="${{ steps.config.outputs.rom_url }}"
-          filename="${{ steps.config.outputs.rom_name }}"
           
           sudo mkdir -p "$(dirname "$rom_path")"
+          echo "🚀 Starting ROM download: ${{ steps.config.outputs.rom_name }}"
           
-          echo "🚀 Starting ROM download: $filename"
-          echo "📥 URL: $rom_url"
-          
-          max_retries=5
-          retry_delay=30
+          max_retries=3
           download_success=false
           
-          for i in $(seq 1 $max_retries); do
-            echo "Attempt $i/$max_retries (尝试 $i/$max_retries)..."
-            
-            if command -v aria2c &> /dev/null; then
-              echo "⚡ Using aria2 download (multi-threaded) (使用aria2下载 - 多线程)"
-              if sudo aria2c -x 8 -s 8 -k 1M --check-certificate=false "$rom_url" -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")"; then
-                echo "✅ aria2 download successful (aria2下载成功)"
+          # Try aria2 first (优先使用aria2)
+          if command -v aria2c &> /dev/null; then
+            echo "⚡ Using aria2 multi-threaded download (使用aria2多线程下载)"
+            for i in $(seq 1 $max_retries); do
+              if sudo aria2c -x 8 -s 8 -k 1M "$rom_url" -d "$(dirname "$rom_path")" -o "$(basename "$rom_path")"; then
                 download_success=true
                 break
               else
-                echo "❌ aria2 download failed (aria2下载失败)"
-                sudo rm -f "$rom_path" 2>/dev/null || true
+                echo "Download attempt $i/$max_retries failed with aria2 - retrying..."
+                sudo rm -f "$rom_path" || true
+                sleep 15
               fi
-            fi
-            
-            if [ "$download_success" = false ] && command -v curl &> /dev/null; then
-              echo "⚡ Using curl download (使用curl下载)"
-              if sudo curl -fL -C - --retry 3 --retry-delay 10 -o "$rom_path" "$rom_url"; then
-                echo "✅ curl download successful (curl下载成功)"
-                download_success=true
-                break
-              else
-                echo "❌ curl download failed (curl下载失败)"
-                sudo rm -f "$rom_path" 2>/dev/null || true
-              fi
-            fi
-            
-            if [ $i -eq $max_retries ]; then
-              echo "::error::❌ ROM download failed after $max_retries attempts (ROM下载失败，已尝试 $max_retries 次)"
-              exit 1
-            fi
-            
-            sleep $retry_delay
-          done
+            done
+          fi
           
-          if [ -f "$rom_path" ]; then
-            file_size=$(stat -c%s "$rom_path" 2>/dev/null || echo "0")
-            if [ "$file_size" -lt 1024 ]; then
-              echo "::error::❌ Downloaded file is too small ($file_size bytes), likely corrupted (下载文件过小，可能已损坏)"
-              exit 1
-            fi
-            echo -e "\n🎉 Download completed (下载完成)"
-            echo "📦 File info (文件信息): $(sudo ls -lh "$rom_path")"
-            echo "📊 File size: $(numfmt --to=iec $file_size)"
-            echo "🔍 File type: $(file "$rom_path" || echo "unknown")"
-          else
-            echo "::error::❌ Download file not found (下载文件未找到)"
+          # Fallback to curl (备用curl)
+          if [ "$download_success" = false ] && command -v curl &> /dev/null; then
+            echo "⚡ Using curl download (使用curl下载)"
+            for i in $(seq 1 $max_retries); do
+              if sudo curl -fL -o "$rom_path" "$rom_url"; then
+                download_success=true
+                break
+              else
+                echo "Download attempt $i/$max_retries failed with curl - retrying..."
+                sudo rm -f "$rom_path" || true
+                sleep 15
+              fi
+            done
+          fi
+          
+          if [ ! -f "$rom_path" ]; then
+            echo "::error::❌ ROM download failed after $max_retries attempts (ROM下载失败)"
             exit 1
           fi
           
-          echo "💾 Disk space after ROM download (ROM下载后磁盘空间):"
+          file_size=$(stat -c%s "$rom_path" 2>/dev/null || echo "0")
+          echo "🎉 ROM download completed: $(numfmt --to=iec $file_size) (ROM下载完成)"
           df -h
 
-      - name: "Configure ROM Specific Settings (配置ROM特定设置)"
+      - name: "ROM Configuration (ROM配置)"
         run: |
-          echo "=== 配置ROM特定设置 ==="
-          echo "Starting ROM-specific configuration (开始配置ROM特定设置)..."
+          echo "=== ROM Configuration (ROM配置) ==="
           
+          # Determine ROM type and apply specific configuration
           rom_type="Generic"
-          if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
-          if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
-          if [ "${{ steps.config.outputs.make_coloros }}" = "true" ]; then rom_type="ColorOS"; fi
-          if [ "${{ steps.config.outputs.make_h2os }}" = "true" ]; then rom_type="H2OS"; fi
-          if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
-          if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
-          
-          echo "ℹ️ Detected ROM type: $rom_type (检测到的ROM类型: $rom_type)"
-          
-          if [ "${{ steps.config.outputs.make_super }}" = "true" ]; then
-            echo "Configuring Super SGSI (配置Super SGSI)..."
-            if [[ -f "SGSI-build-tool/10/make.sh" ]]; then
-              sudo sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
-              echo "Super SGSI configuration completed (Super SGSI配置完成)"
-            else
-              echo "::warning::⚠️ make.sh script not found, skipping Super SGSI configuration (未找到make.sh脚本，跳过Super SGSI配置)"
+          if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then 
+            rom_type="MIUI"
+            sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+            if [[ -f "fix/MIUI.sh" ]]; then
+              sudo cp fix/MIUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
             fi
           fi
           
-          sudo rm -f SGSI-build-tool/10/fixbug/fixbug.sh
+          if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then 
+            rom_type="Flyme" 
+            sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+            if [[ -f "fix/Flyme.sh" ]]; then
+              sudo cp fix/Flyme.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            fi
+          fi
           
-          if [ "$rom_type" = "ColorOS" ]; then
-            echo "Decrypting ColorOS OZIP package (解密ColorOS OZIP包)..."
+          if [ "${{ steps.config.outputs.make_coloros }}" = "true" ]; then 
+            rom_type="ColorOS"
+            # ColorOS decryption
             if [[ -f "SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py" ]]; then
+              echo "🔓 Decrypting ColorOS OZIP (解密ColorOS OZIP)..."
               sudo python3 SGSI-build-tool/10/oppo_ozip/ozipdecrypt.py "SGSI-build-tool/10/tmp/${{ steps.config.outputs.rom_name }}"
               sudo rm -f "SGSI-build-tool/10/tmp/${{ steps.config.outputs.rom_name }}"
-              echo "ColorOS ROM decryption completed (ColorOS ROM解密完成)"
-            else
-              echo "::error::❌ ozipdecrypt.py script not found (未找到ozipdecrypt.py脚本)"
-              exit 1
+            fi
+            sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+            if [[ -f "fix/ColorOS.sh" ]]; then
+              sudo cp fix/ColorOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
             fi
           fi
           
-          if [[ -f "fix/${rom_type}.sh" ]]; then
-            echo "Applying $rom_type configuration script (应用$rom_type配置脚本)..."
-            sudo cp "fix/${rom_type}.sh" SGSI-build-tool/10/fixbug/fixbug.sh
-            sudo chmod +x SGSI-build-tool/10/fixbug/fixbug.sh
-            echo "$rom_type configuration completed ($rom_type配置完成)"
-          else
-            echo "ℹ️ $rom_type configuration script not found, using generic configuration (找不到$rom_type配置脚本，使用通用配置)"
+          if [ "${{ steps.config.outputs.make_h2os }}" = "true" ]; then 
+            rom_type="H2OS"
+            sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+            if [[ -f "fix/H2OS.sh" ]]; then
+              sudo cp fix/H2OS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            fi
           fi
-            
-          echo "ROM-specific configuration completed (ROM特定设置配置完成)"
           
-      - name: "Prepare Build Files (准备构建文件)"
+          if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then 
+            rom_type="SmartisanOS"
+            sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+            if [[ -f "fix/SmartisanOS.sh" ]]; then
+              sudo cp fix/SmartisanOS.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            fi
+          fi
+          
+          if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then 
+            rom_type="ZUI"
+            sudo rm -rf SGSI-build-tool/10/fixbug/fixbug.sh
+            if [[ -f "fix/ZUI.sh" ]]; then
+              sudo cp fix/ZUI.sh SGSI-build-tool/10/fixbug/fixbug.sh
+            fi
+          fi
+          
+          # Super SGSI configuration
+          if [ "${{ steps.config.outputs.make_super }}" = "true" ] && [[ -f "SGSI-build-tool/10/make.sh" ]]; then
+            sudo sed -i 's/SGSI.sh/dynamic_SGSI.sh/g' SGSI-build-tool/10/make.sh
+            echo "✅ Super SGSI configured (Super SGSI配置完成)"
+          fi
+          
+          echo "📱 ROM Type: $rom_type (ROM类型: $rom_type)"
+          echo "✅ ROM configuration completed (ROM配置完成)"
+
+      - name: "Prepare Build Scripts (准备构建脚本)"
         run: |
-          echo "=== 准备构建文件 ==="
-          echo "Preparing build scripts and tools (准备构建脚本和工具)..."
+          echo "=== Prepare Build Scripts (准备构建脚本) ==="
           
+          # Remove existing scripts
+          rm -rf SGSI-build-tool/10/SGSI.sh SGSI-build-tool/10/makeimg.sh SGSI-build-tool/10/dynamic_SGSI.sh SGSI-build-tool/10/oppo.sh SGSI-build-tool/10/make.sh 2>/dev/null || true
+          
+          # Copy custom build scripts
           if [[ -d "make" ]]; then
-            echo "Moving build scripts (移动构建脚本)..."
-            sudo cp -v make/*.sh SGSI-build-tool/10/
-          else
-            echo "ℹ️ make目录不存在"
+            echo "📝 Copying build scripts (复制构建脚本)..."
+            for script in makeimg.sh SGSI.sh dynamic_SGSI.sh oppo.sh make.sh; do
+              if [[ -f "make/$script" ]]; then
+                sudo cp "make/$script" SGSI-build-tool/10/
+                echo "✅ Copied $script"
+              fi
+            done
           fi
           
+          # Copy binary tools
           if [[ -d "bin" ]]; then
-            echo "Moving binary tools (移动二进制工具)..."
-            sudo mkdir -p SGSI-build-tool/10/bin
-            sudo cp -v bin/* SGSI-build-tool/10/bin/
-          else
-            echo "ℹ️ bin目录不存在"
+            echo "🔧 Copying binary tools (复制二进制工具)..."
+            for tool in mke2fs e2fsdroid; do
+              if [[ -f "bin/$tool" ]]; then
+                sudo mkdir -p SGSI-build-tool/10/bin
+                sudo cp "bin/$tool" SGSI-build-tool/10/bin/
+                echo "✅ Copied $tool"
+              fi
+            done
           fi
           
-          echo "✅ Build files preparation completed (构建文件准备完成)"
-          
-      - name: "Free Disk Space Before Build (构建前释放磁盘空间)"
-        run: |
-          echo "=== 构建前释放磁盘空间 ==="
-          echo "🧹 Freeing disk space before build (构建前释放磁盘空间)..."
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-          sudo rm -rf /tmp/* /var/tmp/*
-          sudo journalctl --vacuum-size=1M
-          echo "💾 Disk space before build (构建前磁盘空间):"
-          df -h
-          
-      - name: "Build SGSI Image (构建SGSI镜像)"
+          # Set execution permissions
+          sudo find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
+          echo "✅ Build scripts preparation completed (构建脚本准备完成)"
+
+      - name: "Build SGSI Images (构建SGSI镜像)"
         id: build_sgsi
         run: |
-          echo "=== 构建SGSI镜像 ==="
+          echo "=== Build SGSI Images (构建SGSI镜像) ==="
           cd SGSI-build-tool/10
           
-          echo "🏗️ Starting SGSI build (开始构建SGSI)..."
-          echo "📝 Build log will be saved to make.log (构建日志将保存到make.log)"
+          echo "🧹 Cleaning disk space before build (构建前清理磁盘空间)..."
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
           
+          echo "🏗️ Starting SGSI build (开始构建SGSI)..."
           build_start=$(date +%s)
-          timeout 90m bash -c '
-            set -o pipefail
-            if ! sudo bash make.sh 2>&1 | tee make.log; then
-              echo "::error::❌ Build failed with exit code $? (构建失败，退出代码: $?)"
-              
-              if grep -q "out of memory" make.log; then
-                echo "::error::💥 Build failed due to insufficient memory (内存不足导致构建失败)"
-              elif grep -q "No space left" make.log; then
-                echo "::error::💥 Build failed due to disk space (磁盘空间不足导致构建失败)"
-                echo "💾 Current disk space (当前磁盘空间):"
-                df -h
-              elif grep -q "Permission denied" make.log; then
-                echo "::error::💥 Build failed due to permission issues (权限问题导致构建失败)"
-              fi
-              
-              echo "=== Last 200 lines of build log (构建日志最后200行) ==="
-              tail -200 make.log
-              echo "========================"
-              exit 1
+          
+          if ! sudo bash make.sh 2>&1 | tee make.log; then
+            echo "::error::❌ Build failed (构建失败)"
+            
+            # Error analysis
+            if grep -q "out of memory" make.log; then
+              echo "::error::💥 Insufficient memory (内存不足)"
+            elif grep -q "No space left" make.log; then
+              echo "::error::💥 Disk space exhausted (磁盘空间耗尽)"
+              df -h
+            elif grep -q "Permission denied" make.log; then
+              echo "::error::💥 Permission issues (权限问题)"
             fi
-          ' || exit $?
+            
+            tail -100 make.log
+            exit 1
+          fi
           
           build_end=$(date +%s)
           build_duration=$((build_end - build_start))
-          echo "⏱️ Build completed in $(($build_duration / 60)) minutes and $(($build_duration % 60)) seconds (构建用时: $(($build_duration / 60))分$(($build_duration % 60))秒)"
+          echo "⏱️ Build completed in $(($build_duration / 60))m $(($build_duration % 60))s (构建用时)"
           
-          echo "🎉 SGSI image build completed (SGSI镜像构建完成)"
-          
-          echo "🔒 Fixing permissions for build output files (修复构建产出文件权限)..."
+          # Fix output permissions
           sudo chown -R $(id -u):$(id -g) out/
           sudo chmod -R 755 out/
           
           if [[ ! -d "./out/system" ]]; then
-            echo "::error::❌ Build output directory 'out/system' not found (构建产出目录 'out/system' 未找到)"
+            echo "::error::❌ Build output not found (构建产出未找到)"
             exit 1
           fi
           
+          # Extract build info from build.prop
           if [[ -f "./out/system/system/build.prop" ]]; then
             sudo chmod 644 ./out/system/system/build.prop
             
             model=$(grep 'ro.product.model' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
-            device_codename=$(grep -E 'ro.product.(device|name|board|hardware)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
-            security_patch=$(grep 'ro.build.version.security_patch' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
             android_version=$(grep 'ro.build.version.release' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
             build_date=$(grep 'ro.build.date' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
-            rom_version=$(grep -E 'ro.(build|system|product).(version|display).(incremental|id|name)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
-            build_id=$(grep 'ro.build.id' ./out/system/system/build.prop | head -1 | cut -d'=' -f 2 | tr -d '[:space:]' || echo "Unknown")
             
-            echo "📱 Extracted device model: $model (提取的设备型号: $model)"
-            echo "🔤 Extracted device codename: $device_codename (提取的机型代号: $device_codename)"
-            echo "🔒 Security patch date: $security_patch (安全补丁日期: $security_patch)"
-            echo "📱 Android version: $android_version (Android版本号: $android_version)"
-            echo "📅 Build date: $build_date (构建日期: $build_date)"
-            echo "🔄 ROM version: $rom_version (ROM版本: $rom_version)"
-            echo "🆔 Build ID: $build_id (构建ID: $build_id)"
+            {
+              echo "model=$model"
+              echo "android_version=$android_version" 
+              echo "build_date=$build_date"
+            } >> $GITHUB_OUTPUT
             
-            echo "model=$model" >> $GITHUB_OUTPUT
-            echo "device_codename=$device_codename" >> $GITHUB_OUTPUT
-            echo "security_patch=$security_patch" >> $GITHUB_OUTPUT
-            echo "android_version=$android_version" >> $GITHUB_OUTPUT
-            echo "build_date=$build_date" >> $GITHUB_OUTPUT
-            echo "rom_version=$rom_version" >> $GITHUB_OUTPUT
-            echo "build_id=$build_id" >> $GITHUB_OUTPUT
+            echo "📱 Build Info: $model, Android $android_version, $build_date"
           else
-            echo "⚠️ build.prop file not found (未找到build.prop文件)"
             echo "model=Unknown" >> $GITHUB_OUTPUT
-            echo "device_codename=Unknown" >> $GITHUB_OUTPUT
-            echo "security_patch=Unknown" >> $GITHUB_OUTPUT
             echo "android_version=Unknown" >> $GITHUB_OUTPUT
             echo "build_date=Unknown" >> $GITHUB_OUTPUT
-            echo "rom_version=Unknown" >> $GITHUB_OUTPUT
-            echo "build_id=Unknown" >> $GITHUB_OUTPUT
           fi
           
           echo "💾 Disk space after build (构建后磁盘空间):"
           df -h
-           
-      - name: "Clean Intermediate Files (清理中间文件)"
+
+      - name: "Process Patch Files (处理补丁文件)"
+        id: process_patches
         run: |
-          echo "=== 清理中间文件 ==="
-          echo "🧹 Cleaning intermediate files to free space (清理中间文件释放空间)..."
+          echo "=== Process Patch Files (处理补丁文件) ==="
+          
+          # Clean up temporary files to free space
           sudo rm -rf SGSI-build-tool/10/tmp/*
-          if [[ -f "SGSI-build-tool/10/make.log" ]]; then
-            log_size=$(stat -c%s "SGSI-build-tool/10/make.log")
-            if [[ $log_size -gt 104857600 ]]; then
-              echo "🗑️ Removing large build log (删除大型构建日志)..."
-              rm -f SGSI-build-tool/10/make.log
-            fi
-          fi
-          echo "✅ Intermediate files cleaned (中间文件已清理)"
-          df -h
-
-      - name: "Debug: Check Patch Directory (调试: 检查补丁目录)"
-        run: |
-          echo "=== 调试: 检查补丁目录 ==="
-          echo "📁 当前工作目录: $(pwd)"
-          echo "📁 目录结构:"
-          ls -la
           
-          if [[ -d "Patch" ]]; then
-            echo "✅ Patch目录存在"
-            echo "📁 Patch目录内容:"
-            ls -la Patch/
-            
-            for i in 1 2 3; do
-              patch_dir="Patch/Patch${i}"
-              if [[ -d "$patch_dir" ]]; then
-                echo "✅ $patch_dir 存在"
-                echo "📁 $patch_dir 内容:"
-                ls -la "$patch_dir"
-                file_count=$(find "$patch_dir" -type f | wc -l)
-                echo "📊 $patch_dir 文件数量: $file_count"
-              else
-                echo "❌ $patch_dir 不存在"
-              fi
-            done
-          else
-            echo "❌ Patch目录不存在"
-          fi
-          
-          echo "💾 当前磁盘空间:"
-          df -h
-
-      - name: "检查磁盘空间"
-        run: |
-          echo "💾 磁盘空间检查:"
-          df -h
+          # Check disk space
           available_space=$(df . | awk 'NR==2 {print $4}')
           if [[ $available_space -lt 1048576 ]]; then
-            echo "⚠️ 磁盘空间不足，清理临时文件..."
-            sudo rm -rf /tmp/*
-            sudo rm -rf /var/tmp/*
+            echo "⚠️ Low disk space, cleaning temp files (磁盘空间不足，清理临时文件)..."
+            sudo rm -rf /tmp/* /var/tmp/*
             sudo apt-get clean
-            echo "💾 清理后磁盘空间:"
-            df -h
           fi
-
-      - name: "Package Patches - Method 1 (ZIP打包)"
-        id: package_patches_zip
-        run: |
-          echo "=== 方法1: ZIP打包补丁文件 ==="
-          
-          if [[ ! -d "Patch" ]]; then
-            echo "ℹ️ 未找到Patch目录，跳过补丁打包"
-            echo "patch_method=none" >> $GITHUB_OUTPUT
-            echo "patch_count=0" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          mkdir -p SGSI-build-tool/10/SGSI/
-          
-          echo "💾 Disk space before patch packaging (补丁打包前磁盘空间):"
-          df -h
           
           patch_count=0
-          for i in {1..3}; do
-            patch_dir="Patch/Patch${i}"
-            output_file="Patch${i}.zip"
-            
+          
+          # Process each patch directory
+          for patch_num in 1 2 3; do
+            patch_dir="Patch/Patch${patch_num}"
             if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
-              echo "📦 打包补丁 $i: $patch_dir → $output_file"
+              echo "📦 Packaging Patch${patch_num} (打包补丁${patch_num})..."
               
-              echo "📁 补丁目录内容:"
-              ls -la "$patch_dir" || echo "无法列出补丁目录"
-              
-              echo "🔧 开始打包..."
-              if (cd "$patch_dir" && zip -r "../$output_file" . -q); then
-                echo "✅ 补丁打包成功: $output_file"
-                if [[ -f "../$output_file" ]]; then
-                  file_size=$(stat -c%s "../$output_file" 2>/dev/null || echo "0")
-                  echo "📦 打包文件大小: $(numfmt --to=iec $file_size)"
-                  if mv "../$output_file" "SGSI-build-tool/10/SGSI/" 2>/dev/null; then
-                    echo "✅ 文件移动成功"
+              # Create zip package
+              if zip -r "Patch${patch_num}.zip" "$patch_dir"; then
+                if [[ -f "Patch${patch_num}.zip" ]]; then
+                  # Move to SGSI directory
+                  sudo mkdir -p SGSI-build-tool/10/SGSI/
+                  if sudo mv "Patch${patch_num}.zip" SGSI-build-tool/10/SGSI/; then
                     ((patch_count++))
-                  elif sudo mv "../$output_file" "SGSI-build-tool/10/SGSI/" 2>/dev/null; then
-                    echo "✅ 文件移动成功 (使用sudo)"
-                    ((patch_count++))
+                    echo "✅ Patch${patch_num} packaged successfully (补丁${patch_num}打包成功)"
                   else
-                    echo "⚠️ 无法移动文件 $output_file"
-                    rm -f "../$output_file" 2>/dev/null || true
-                  fi
-                else
-                  echo "❌ 打包文件未生成"
-                fi
-              else
-                echo "❌ 补丁打包失败: $patch_dir"
-                rm -f "../$output_file" 2>/dev/null || true
-              fi
-            else
-              echo "ℹ️ 补丁目录不存在或为空: $patch_dir"
-            fi
-            echo "---"
-          done
-          
-          echo "✅ 补丁文件打包完成，成功打包 $patch_count 个补丁"
-          
-          echo "patch_method=zip" >> $GITHUB_OUTPUT
-          echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
-          
-          echo "💾 打包后磁盘空间:"
-          df -h
-
-      - name: "Package Patches - Method 2 (文件复制)"
-        id: package_patches_copy
-        if: steps.package_patches_zip.outputs.patch_count == '0'
-        run: |
-          echo "=== 方法2: 直接复制补丁文件 ==="
-          
-          if [[ ! -d "Patch" ]]; then
-            echo "ℹ️ 未找到Patch目录，跳过补丁处理"
-            echo "patch_method=none" >> $GITHUB_OUTPUT
-            echo "patch_count=0" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          set +e
-          
-          echo "💾 当前磁盘空间:"
-          df -h
-          
-          echo "🔧 修复SGSI目录权限..."
-          sudo mkdir -p SGSI-build-tool/10/SGSI/
-          sudo chown -R $(id -u):$(id -g) SGSI-build-tool/10/SGSI/
-          sudo chmod -R 755 SGSI-build-tool/10/SGSI/
-          
-          patch_count=0
-          for i in 1 2 3; do
-            patch_dir="Patch/Patch${i}"
-            if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
-              echo "📁 复制补丁目录: $patch_dir"
-              
-              target_dir="SGSI-build-tool/10/SGSI/Patch${i}"
-              mkdir -p "$target_dir"
-              
-              echo "🔧 开始复制文件..."
-              if rsync -av "$patch_dir"/ "$target_dir"/ 2>/dev/null; then
-                echo "✅ 补丁 $i 复制成功 (使用rsync)"
-                ((patch_count++))
-              else
-                echo "⚠️ 补丁 $i rsync复制失败，尝试使用cp..."
-                if cp -r "$patch_dir"/* "$target_dir"/ 2>/dev/null; then
-                  echo "✅ 补丁 $i 复制成功 (使用cp)"
-                  ((patch_count++))
-                else
-                  echo "⚠️ 补丁 $i cp复制失败，尝试使用tar..."
-                  if (cd "$patch_dir" && tar cf - . | (cd "$target_dir" && tar xf -)); then
-                    echo "✅ 补丁 $i 复制成功 (使用tar)"
-                    ((patch_count++))
-                  else
-                    echo "❌ 补丁 $i 所有复制方法都失败"
+                    echo "⚠️ Failed to move Patch${patch_num}.zip (移动补丁${patch_num}失败)"
+                    rm -f "Patch${patch_num}.zip"
                   fi
                 fi
+              else
+                echo "❌ Failed to package Patch${patch_num} (打包补丁${patch_num}失败)"
+                rm -f "Patch${patch_num}.zip"
               fi
             else
-              echo "ℹ️ 补丁目录 $patch_dir 不存在或为空"
+              echo "ℹ️ Patch${patch_num} directory not found or empty (补丁${patch_num}目录不存在或为空)"
             fi
-            echo "---"
           done
           
-          set -e
-          
-          echo "补丁处理完成: $patch_count 个成功"
-          
-          echo "patch_method=copy" >> $GITHUB_OUTPUT
           echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
-          
-          echo "💾 复制后磁盘空间:"
+          echo "✅ Patch processing completed: $patch_count patches (补丁处理完成: $patch_count 个补丁)"
           df -h
 
-      - name: "Package Patches - Method 3 (简化版)"
-        id: package_patches_simple
-        if: steps.package_patches_zip.outputs.patch_count == '0' && steps.package_patches_copy.outputs.patch_count == '0'
+      - name: "Create Final Package (创建最终包)"
         run: |
-          echo "=== 方法3: 简化补丁处理 ==="
+          echo "=== Create Final Package (创建最终包) ==="
           
-          if [[ ! -d "Patch" ]]; then
-            echo "patch_method=none" >> $GITHUB_OUTPUT
-            echo "patch_count=0" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          # Create upload directory
+          mkdir -p upload
           
-          mkdir -p SGSI-build-tool/10/SGSI/
-          
-          patch_count=0
-          for i in 1 2 3; do
-            if [[ -d "Patch/Patch${i}" ]] && [[ -n "$(ls Patch/Patch${i}/ 2>/dev/null)" ]]; then
-              echo "复制补丁 Patch${i}"
-              cp -r "Patch/Patch${i}" "SGSI-build-tool/10/SGSI/" && ((patch_count++))
-            fi
-          done
-          
-          echo "patch_method=simple_copy" >> $GITHUB_OUTPUT
-          echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
-          echo "✅ 补丁处理完成 (简化版)"
-
-      - name: "Package Output Files (打包输出文件)"
-        run: |
-          echo "=== 打包输出文件 ==="
-          cd SGSI-build-tool/10
-          
-          echo "📁 当前目录: $(pwd)"
-          echo "📁 目录内容:"
-          ls -la
-          
-          if [[ ! -d "SGSI" ]]; then
-            echo "::error::❌ SGSI directory does not exist! (SGSI目录不存在！)"
-            echo "📁 当前目录内容:"
-            ls -la
+          # Verify SGSI directory exists and has content
+          if [[ ! -d "SGSI-build-tool/10/SGSI" ]] || [[ -z "$(ls -A SGSI-build-tool/10/SGSI/ 2>/dev/null)" ]]; then
+            echo "::error::❌ SGSI directory is empty (SGSI目录为空)"
             exit 1
           fi
           
-          if [[ -z "$(ls -A SGSI/ 2>/dev/null)" ]]; then
-            echo "::error::❌ SGSI directory is empty! (SGSI目录为空！)"
-            echo "📁 SGSI目录内容:"
-            ls -la SGSI/ || echo "无法列出SGSI目录"
-            exit 1
-          fi
-          
-          echo "📁 SGSI目录内容:"
-          ls -la SGSI/
+          echo "📁 Contents of SGSI directory (SGSI目录内容):"
+          ls -la SGSI-build-tool/10/SGSI/
           
           output_file="${{ steps.config.outputs.pack_sgsi }}"
           
-          echo "Fixing file ownership (修复文件所有权)..."
-          sudo chown -R $(id -u):$(id -g) SGSI/
-          sudo chmod -R 755 SGSI/
+          # Fix permissions before packaging
+          sudo chown -R $(id -u):$(id -g) SGSI-build-tool/10/SGSI/
+          sudo chmod -R 755 SGSI-build-tool/10/SGSI/
           
-          echo "Packaging SGSI to: $output_file"
-          echo "💾 打包前磁盘空间:"
-          df -h
+          echo "📦 Creating package: $output_file"
           
-          if ! zip -r -q "$output_file" SGSI/*; then
-            echo "::error::❌ Packaging failed! (打包失败！)"
-            echo "尝试使用详细模式重新打包..."
-            if ! zip -r "$output_file" SGSI/*; then
-              echo "::error::❌ 详细模式打包也失败"
-              exit 1
-            fi
-          fi
-          
-          if [[ ! -f "$output_file" ]]; then
-            echo "::error::❌ Output file was not created (输出文件未创建)"
+          # Create zip package
+          if ! zip -r "$output_file" SGSI-build-tool/10/SGSI/*; then
+            echo "::error::❌ Packaging failed (打包失败)"
             exit 1
           fi
           
-          file_size=$(stat -c%s "$output_file")
-          if [[ $file_size -eq 0 ]]; then
-            echo "::error::❌ Output file is empty (输出文件为空)"
-            exit 1
-          fi
+          # Check file size and split if necessary
+          file_size=$(stat -c%s "$output_file" 2>/dev/null || echo "0")
+          max_size=2097152000  # 2GB
           
-          echo "✅ Package created: $output_file ($(numfmt --to=iec-i $file_size))"
-          
-          mkdir -p "${GITHUB_WORKSPACE}/upload"
-          max_size=2000000000
+          echo "📊 Package size: $(numfmt --to=iec $file_size)"
           
           if [[ $file_size -gt $max_size ]]; then
-            echo "⚠️ File too large, splitting into parts (文件过大，进行分卷打包)..."
-            split -b 1500m -d -a 1 "$output_file" "${output_file}_part"
-            mv "${output_file}_part"* "${GITHUB_WORKSPACE}/upload/"
-            rm "$output_file"
-            echo "Split file list (分卷文件列表):"
-            ls -lh "${GITHUB_WORKSPACE}/upload"
+            echo "⚠️ Package exceeds 2GB, splitting into 1024MB segments (包超过2GB，分卷处理)..."
+            
+            # Split using tar and split (more reliable method)
+            tar -cpzf - "$output_file" | split -d -b 1024m - "upload/${output_file}."
+            echo "✅ Split packaging completed (分卷打包完成)"
+            
+            # Remove original large file
+            rm -f "$output_file"
           else
-            echo "Moving file to upload directory (移动文件到上传目录)"
-            mv "$output_file" "${GITHUB_WORKSPACE}/upload/"
+            echo "📤 Moving single package to upload directory (移动单包到上传目录)"
+            mv "$output_file" upload/
           fi
           
-          echo "=== Upload directory contents (上传目录内容) ==="
-          ls -lh "${GITHUB_WORKSPACE}/upload" || { echo "❌ Upload directory is empty!"; exit 1; }
-          echo "===================="
+          echo "📁 Final artifacts in upload/ (最终产物):"
+          ls -lh upload/
           
-          echo "UPLOAD_DIR=${GITHUB_WORKSPACE}/upload" >> $GITHUB_ENV
+          # Set upload directory environment variable
+          echo "UPLOAD_DIR=upload" >> $GITHUB_ENV
           
-          echo "💾 Final disk space (最终磁盘空间):"
+          echo "✅ Final packaging completed (最终打包完成)"
           df -h
-             
-      - name: "Upload to GitHub Artifacts"
-        uses: actions/upload-artifact@v4
-        with:
-          name: sgsi-build-artifacts
-          path: ${{ env.UPLOAD_DIR }}/*
-          retention-days: 30
-        continue-on-error: true
-             
-      - name: "Generate Release Tag and Time Info (生成发布标签和时间信息)"
-        id: release_tag
+
+      - name: "Create Release (创建发布)"
+        id: create_release
         run: |
-          current_date=$(TZ='Asia/Shanghai' date +"%Y%m%d")
-          timestamp=$(TZ='Asia/Shanghai' date +"%H%M")
+          echo "=== Create Release Info (创建发布信息) ==="
           
+          current_date=$(date +"%Y%m%d")
+          timestamp=$(date +"%H%M")
+          
+          # Determine ROM type
           rom_type="Generic"
           if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
@@ -746,83 +463,49 @@ jobs:
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
-          release_tag="${current_date}_${timestamp}-${rom_type}-1.9"
-          echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
+          release_tag="${current_date}-${timestamp}-${rom_type}-1.9"
+          build_time=$(date +"%Y-%m-%d %H:%M")
           
-          build_time=$(TZ='Asia/Shanghai' date +"%Y-%m-%d %p %I:%M")
-          build_time=$(echo "$build_time" | sed -e 's/AM/上午/' -e 's/PM/下午/')
-          build_time="${build_time} [北京时间]"
-          echo "build_time=$build_time" >> $GITHUB_OUTPUT
+          {
+            echo "release_tag=$release_tag"
+            echo "build_time=$build_time" 
+            echo "rom_type=$rom_type"
+          } >> $GITHUB_OUTPUT
           
-          original_build_date="${{ steps.build_sgsi.outputs.build_date }}"
-          if [[ "$original_build_date" != "Unknown" ]]; then
-            parsed_date=$(echo "$original_build_date" | sed -E 's/([a-zA-Z]{3})([a-zA-Z]{3})([0-9]{2})([0-9]{2}:[0-9]{2}:[0-9]{2})([A-Z]{3})([0-9]{4})/\1 \2 \3 \4 \5 \6/' 2>/dev/null)
-            formatted_date=$(date -d "$parsed_date" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null || echo "$original_build_date")
-            echo "formatted_build_date=$formatted_date" >> $GITHUB_OUTPUT
-          else
-            echo "formatted_build_date=Unknown" >> $GITHUB_OUTPUT
-          fi
-          
-          model="${{ steps.build_sgsi.outputs.model }}"
-          device_codename="${{ steps.build_sgsi.outputs.device_codename }}"
-          if [[ "$model" == "Unknown" && "$device_codename" == "Unknown" ]]; then
-            source_device="Unknown"
-          elif [[ "$model" == "Unknown" ]]; then
-            source_device="$device_codename"
-          elif [[ "$device_codename" == "Unknown" ]]; then
-            source_device="$model"
-          else
-            source_device="$model [$device_codename]"
-          fi
-          echo "source_device=$source_device" >> $GITHUB_OUTPUT
-          
-          echo "rom_type=$rom_type" >> $GITHUB_OUTPUT
-          
-          echo "Generated release tag: $release_tag (生成的发布标签: $release_tag)"
-          echo "Build time: $build_time (构建时间: $build_time)"
-          echo "ROM type: $rom_type (ROM 类型: $rom_type)"
-          
-      - name: "Create Release (创建发布)"
-        uses: softprops/action-gh-release@v1
+          echo "🏷️ Release Tag: $release_tag"
+          echo "🕐 Build Time: $build_time"
+          echo "📱 ROM Type: $rom_type"
+
+      - name: "Upload Release (上传发布)"
+        uses: ncipollo/release-action@v1.8.6
         with:
-          name: "Auto Build SGSI With XiaoxinTools [${{ steps.release_tag.outputs.release_tag }}]"
-          tag_name: "${{ steps.release_tag.outputs.release_tag }}"
-          files: "${{ env.UPLOAD_DIR }}/*"
+          artifacts: '${{ env.UPLOAD_DIR }}/*'
+          name: 'SGSI Build ${{ steps.create_release.outputs.release_tag }}'
+          tag: '${{ steps.create_release.outputs.release_tag }}'
           body: |
-            ##  📱 SGSI Build Information (构建信息)
+            ## 📱 SGSI Build Information
             
-            ### 基础信息 (Basic Info)
-            - **构建时间 (Built at):** ${{ steps.release_tag.outputs.build_time }}
-            - **原包机型 (Source Device):** ${{ steps.release_tag.outputs.source_device }}
-            - **ROM 类型 (ROM Type):** ${{ steps.release_tag.outputs.rom_type }}
-            - **Android 版本 (Android Version):** ${{ steps.build_sgsi.outputs.android_version }}
-            - **ROM 版本 (ROM Version):** ${{ steps.build_sgsi.outputs.rom_version }}
-            - **构建 ID (Build ID):** ${{ steps.build_sgsi.outputs.build_id }}
-            - **安全补丁 (Security Patch):** ${{ steps.build_sgsi.outputs.security_patch }}
-            - **原构建日期 (Source Build Date):** ${{ steps.release_tag.outputs.formatted_build_date }}
-            - **补丁打包方式:** ${{ steps.package_patches_zip.outputs.patch_method || steps.package_patches_copy.outputs.patch_method || steps.package_patches_simple.outputs.patch_method || 'None' }}
-            - **补丁数量:** ${{ steps.package_patches_zip.outputs.patch_count || steps.package_patches_copy.outputs.patch_count || steps.package_patches_simple.outputs.patch_count || '0' }}
+            ### Build Details
+            - **Build Time:** ${{ steps.create_release.outputs.build_time }}
+            - **ROM Type:** ${{ steps.create_release.outputs.rom_type }}
+            - **Android Version:** ${{ steps.build_sgsi.outputs.android_version }}
+            - **Device Model:** ${{ steps.build_sgsi.outputs.model }}
+            - **Build Date:** ${{ steps.build_sgsi.outputs.build_date }}
+            - **Patches Applied:** ${{ steps.process_patches.outputs.patch_count }}
             
-            ### 下载链接 (Download Links)
-            - **GitHub Artifacts（30天保留）:** [点击下载](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
+            ### Download
+            Artifacts are available for download below.
             
-            ### 其他信息 (Other Info)
-            - **构建工具 (Build Tools):** XiaoxinTools_1.9 (Only for Android 10/AB)
-            - **构建日志 (Build Log):** [View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) (点击查看详细日志)
-            
-            ---
-            
-             ⚠️ **实验性构建 (Experimental Build):**  
-            This is an experimental build and may have stability issues. Please test before using as a daily driver.  
-            这是实验性构建，可能存在稳定性问题，请测试后再作为主力系统使用。
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: "Completion Notification (完成通知)"
+            ### Notes
+            This is an automated SGSI build using XiaoxinTools 1.9
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Completion Summary (完成总结)"
         if: success()
         run: |
-          echo "🎉 Build completed! (构建完成!)"
-          echo "Release tag: ${{ steps.release_tag.outputs.release_tag }} (发布标签)"
-          echo "Artifact location: ${{ env.UPLOAD_DIR }} (产物位置)"
-          echo "Patch method: ${{ steps.package_patches_zip.outputs.patch_method || steps.package_patches_copy.outputs.patch_method || steps.package_patches_simple.outputs.patch_method || 'None' }}"
-          echo "Patch count: ${{ steps.package_patches_zip.outputs.patch_count || steps.package_patches_copy.outputs.patch_count || steps.package_patches_simple.outputs.patch_count || '0' }}"
+          echo "🎉 Build Completed Successfully! (构建成功完成!)"
+          echo "🏷️ Release: ${{ steps.create_release.outputs.release_tag }}"
+          echo "📦 Artifacts: ${{ env.UPLOAD_DIR }}"
+          echo "📊 Patches: ${{ steps.process_patches.outputs.patch_count }}"
+          echo "📱 Device: ${{ steps.build_sgsi.outputs.model }}"
+          echo "🤖 Android: ${{ steps.build_sgsi.outputs.android_version }}"
