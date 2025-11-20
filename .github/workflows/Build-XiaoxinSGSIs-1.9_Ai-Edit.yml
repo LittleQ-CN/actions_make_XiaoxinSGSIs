@@ -35,12 +35,6 @@ jobs:
           echo "✅ sgsi.json 文件存在"
           echo "文件内容:"
           cat sgsi.json
-          
-          if [[ -f "SGSI-build-tool/10/sgsi.sh" ]]; then
-            echo "✅ Detected configured sgsi.sh file (检测到已配置sgsi.sh文件)"
-          else
-            echo "ℹ️ No custom sgsi.sh detected, using default config (未检测到自定义sgsi.sh文件，将使用默认配置)"
-          fi
        
       - name: "Parse Config Variables (解析配置变量)"
         id: config
@@ -322,22 +316,6 @@ jobs:
           fi
             
           echo "ROM-specific configuration completed (ROM特定设置配置完成)"
-          
-      - name: "Fix Script Syntax Errors (修复脚本语法错误)"
-        run: |
-          echo "=== 修复脚本语法错误 ==="
-          cd SGSI-build-tool/10
-          
-          echo "Checking and fixing SGSI.sh script errors (检查并修复SGSI.sh脚本错误)..."
-          if [[ -f "SGSI.sh" ]]; then
-            echo "🔧 修复SGSI.sh语法..."
-            sudo sed -i 's/\[ *\] *== *"\(.*\)" *]/\[ -n "\1" ]/g' SGSI.sh
-            sudo sed -i 's/==/=/g' SGSI.sh
-            echo "✅ Script syntax errors fixed (已修复脚本语法错误)"
-          else
-            echo "::warning::⚠️ SGSI.sh script not found (未找到SGSI.sh脚本)"
-          fi
-          cd ../..
           
       - name: "Prepare Build Files (准备构建文件)"
         run: |
