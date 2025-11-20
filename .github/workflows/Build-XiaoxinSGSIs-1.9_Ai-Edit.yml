@@ -9,10 +9,10 @@ jobs:
     timeout-minutes: 120
     
     steps:
-      - name: Checkout Code (检出代码)
+      - name: "Checkout Code (检出代码)"
         uses: actions/checkout@v4
         
-      - name: Initial Setup & Cleanup (初始设置和清理)
+      - name: "Initial Setup & Cleanup (初始设置和清理)"
         run: |
           echo "💾 Initial disk space (初始磁盘空间):"
           df -h
@@ -22,7 +22,7 @@ jobs:
           echo "✅ Initial cleanup completed (初始清理完成)"
           df -h
        
-      - name: Configuration Check & Setup (配置检查和设置)
+      - name: "Configuration Check & Setup (配置检查和设置)"
         run: |
           echo "=== Configuration Check (配置检查) ==="
           if [[ ! -f "sgsi.json" ]]; then
@@ -34,7 +34,7 @@ jobs:
           echo "File content (文件内容):"
           cat sgsi.json
        
-      - name: Parse Configuration (解析配置)
+      - name: "Parse Configuration (解析配置)"
         id: config
         run: |
           echo "=== Parse Configuration (解析配置) ==="
@@ -62,7 +62,7 @@ jobs:
             echo "make_super=$(jq -r '.make_super // "false"' sgsi.json)"
           } >> $GITHUB_OUTPUT
            
-      - name: Install Tools & Download Build Tools (安装工具和下载构建工具)
+      - name: "Install Tools & Download Build Tools (安装工具和下载构建工具)"
         run: |
           echo "=== Install Essential Tools (安装必要工具) ==="
           sudo apt-get update
@@ -95,7 +95,7 @@ jobs:
           echo "✅ Environment setup completed (环境设置完成)"
           df -h
           
-      - name: Setup Build Environment (设置构建环境)
+      - name: "Setup Build Environment (设置构建环境)"
         run: |
           echo "=== Setup Build Environment (设置构建环境) ==="
           
@@ -117,7 +117,7 @@ jobs:
           sudo chmod -R 755 SGSI-build-tool
           echo "✅ Build environment setup completed (构建环境设置完成)"
 
-      - name: Download ROM File (下载ROM文件)
+      - name: "Download ROM File (下载ROM文件)"
         run: |
           rom_path="SGSI-build-tool/10/tmp/${{ steps.config.outputs.rom_name }}"
           rom_url="${{ steps.config.outputs.rom_url }}"
@@ -167,7 +167,7 @@ jobs:
           echo "🎉 ROM download completed: $(numfmt --to=iec $file_size) (ROM下载完成)"
           df -h
 
-      - name: ROM Configuration (ROM配置)
+      - name: "ROM Configuration (ROM配置)"
         run: |
           echo "=== ROM Configuration (ROM配置) ==="
           
@@ -236,7 +236,7 @@ jobs:
           echo "📱 ROM Type: $rom_type (ROM类型: $rom_type)"
           echo "✅ ROM configuration completed (ROM配置完成)"
 
-      - name: Prepare Build Scripts (准备构建脚本)
+      - name: "Prepare Build Scripts (准备构建脚本)"
         run: |
           echo "=== Prepare Build Scripts (准备构建脚本) ==="
           
@@ -270,7 +270,7 @@ jobs:
           sudo find SGSI-build-tool/10 -name "*.sh" -exec chmod +x {} \;
           echo "✅ Build scripts preparation completed (构建脚本准备完成)"
 
-      - name: Build SGSI Images (构建SGSI镜像)
+      - name: "Build SGSI Images (构建SGSI镜像)"
         id: build_sgsi
         run: |
           echo "=== Build SGSI Images (构建SGSI镜像) ==="
@@ -337,7 +337,7 @@ jobs:
           echo "💾 Disk space after build (构建后磁盘空间):"
           df -h
 
-      - name: Debug Environment (调试环境)
+      - name: "Debug Environment (调试环境)"
         run: |
           echo "=== Debug Environment (调试环境) ==="
           
@@ -380,7 +380,7 @@ jobs:
           echo "🔍 Memory info (内存信息):"
           free -h
 
-      - name: Simple Patch Copy (简单补丁复制)
+      - name: "Simple Patch Copy (简单补丁复制)"
         id: simple_patches
         run: |
           echo "=== Simple Patch Copy (简单补丁复制) ==="
@@ -437,7 +437,7 @@ jobs:
           echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
           echo "✅ Simple patch copy completed: $patch_count patches (简单补丁复制完成: $patch_count 个补丁)"
 
-      - name: Alternative Patch Method (替代补丁方法)
+      - name: "Alternative Patch Method (替代补丁方法)"
         id: alternative_patches
         if: steps.simple_patches.outputs.patch_count == '0'
         run: |
@@ -463,16 +463,7 @@ jobs:
               
               # Method 2: Use python
               echo "🔄 Method 2: python"
-              if python3 -c "
-import shutil
-import os
-try:
-    shutil.copytree('$patch_dir', 'SGSI-build-tool/10/SGSI/Patch${patch_num}')
-    print('Python copy successful')
-except Exception as e:
-    print(f'Python copy failed: {e}')
-    exit(1)
-"; then
+              if python3 -c "import shutil, os; shutil.copytree('$patch_dir', 'SGSI-build-tool/10/SGSI/Patch${patch_num}')" 2>/dev/null; then
                 ((patch_count++))
                 echo "✅ Patch${patch_num} copied with python"
                 continue
@@ -494,14 +485,14 @@ except Exception as e:
           echo "alternative_count=$patch_count" >> $GITHUB_OUTPUT
           echo "✅ Alternative methods completed: $patch_count patches (替代方法完成: $patch_count 个补丁)"
 
-      - name: Skip Patches if All Failed (如果所有补丁都失败则跳过)
+      - name: "Skip Patches if All Failed (如果所有补丁都失败则跳过)"
         if: steps.simple_patches.outputs.patch_count == '0' && steps.alternative_patches.outputs.alternative_count == '0'
         run: |
           echo "⚠️ All patch methods failed, continuing without patches (所有补丁方法都失败，继续但不包含补丁)"
           mkdir -p SGSI-build-tool/10/SGSI/
           echo "Created empty SGSI directory (创建了空的SGSI目录)"
 
-      - name: Create Final Package (创建最终包)
+      - name: "Create Final Package (创建最终包)"
         run: |
           echo "=== Create Final Package (创建最终包) ==="
           
@@ -543,8 +534,25 @@ except Exception as e:
             exit 1
           fi
           
-          # Move to upload directory
-          mv "$output_file" upload/ 2>/dev/null || true
+          # Check file size and split if necessary
+          file_size=$(stat -c%s "$output_file" 2>/dev/null || echo "0")
+          max_size=2097152000  # 2GB
+          
+          echo "📊 Package size: $(numfmt --to=iec $file_size)"
+          
+          if [[ $file_size -gt $max_size ]]; then
+            echo "⚠️ Package exceeds 2GB, splitting into 1024MB segments (包超过2GB，分卷处理)..."
+            
+            # Split using tar and split
+            tar -cpzf - "$output_file" | split -d -b 1024m - "upload/${output_file}."
+            echo "✅ Split packaging completed (分卷打包完成)"
+            
+            # Remove original large file
+            rm -f "$output_file"
+          else
+            echo "📤 Moving single package to upload directory (移动单包到上传目录)"
+            mv "$output_file" upload/
+          fi
           
           echo "📁 Final artifacts in upload/ (最终产物):"
           ls -lh upload/ 2>/dev/null || echo "Upload directory is empty"
@@ -555,7 +563,7 @@ except Exception as e:
           echo "✅ Final packaging completed (最终打包完成)"
           df -h
 
-      - name: Create Release (创建发布)
+      - name: "Create Release (创建发布)"
         id: create_release
         run: |
           echo "=== Create Release Info (创建发布信息) ==="
@@ -585,7 +593,7 @@ except Exception as e:
           echo "🕐 Build Time: $build_time"
           echo "📱 ROM Type: $rom_type"
 
-      - name: Upload Release (上传发布)
+      - name: "Upload Release (上传发布)"
         uses: ncipollo/release-action@v1.8.6
         with:
           artifacts: '${{ env.UPLOAD_DIR }}/*'
@@ -609,7 +617,7 @@ except Exception as e:
             This is an automated SGSI build using XiaoxinTools 1.9
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Completion Summary (完成总结)
+      - name: "Completion Summary (完成总结)"
         if: success()
         run: |
           echo "🎉 Build Process Completed! (构建过程完成!)"
