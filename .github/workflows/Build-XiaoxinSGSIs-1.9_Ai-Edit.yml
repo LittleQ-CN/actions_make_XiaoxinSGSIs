@@ -66,7 +66,7 @@ jobs:
         run: |
           echo "=== Install Essential Tools (安装必要工具) ==="
           sudo apt-get update
-          sudo apt-get install -y aria2 curl jq zip unzip python3 file
+          sudo apt-get install -y aria2 curl jq zip unzip python3 file rsync
           sudo apt-get clean
           
           echo "📥 Downloading build tools (下载构建工具)..."
@@ -318,260 +318,384 @@ jobs:
             sudo chmod 644 ./out/system/system/build.prop
             
             model=$(grep 'ro.product.model' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            device_codename=$(grep -E 'ro.product.(device|name|board|hardware)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            security_patch=$(grep 'ro.build.version.security_patch' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
             android_version=$(grep 'ro.build.version.release' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
             build_date=$(grep 'ro.build.date' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            rom_version=$(grep -E 'ro.(build|system|product).(version|display).(incremental|id|name)' ./out/system/system/build.prop | head -1 | cut -d'=' -f2 | tr -d '[:space:]' || echo "Unknown")
+            build_id=$(grep 'ro.build.id' ./out/system/system/build.prop | head -1 | cut -d'=' -f 2 | tr -d '[:space:]' || echo "Unknown")
             
             {
               echo "model=$model"
+              echo "device_codename=$device_codename"
+              echo "security_patch=$security_patch"
               echo "android_version=$android_version" 
               echo "build_date=$build_date"
+              echo "rom_version=$rom_version"
+              echo "build_id=$build_id"
             } >> $GITHUB_OUTPUT
             
             echo "📱 Build Info: $model, Android $android_version, $build_date"
           else
             echo "model=Unknown" >> $GITHUB_OUTPUT
+            echo "device_codename=Unknown" >> $GITHUB_OUTPUT
+            echo "security_patch=Unknown" >> $GITHUB_OUTPUT
             echo "android_version=Unknown" >> $GITHUB_OUTPUT
             echo "build_date=Unknown" >> $GITHUB_OUTPUT
+            echo "rom_version=Unknown" >> $GITHUB_OUTPUT
+            echo "build_id=Unknown" >> $GITHUB_OUTPUT
           fi
           
           echo "💾 Disk space after build (构建后磁盘空间):"
           df -h
 
-      - name: "Debug Environment (调试环境)"
+      - name: "Clean Intermediate Files (清理中间文件)"
         run: |
-          echo "=== Debug Environment (调试环境) ==="
+          echo "=== Clean Intermediate Files (清理中间文件) ==="
+          echo "🧹 Cleaning intermediate files to free space (清理中间文件释放空间)..."
+          sudo rm -rf SGSI-build-tool/10/tmp/*
           
-          echo "🔍 Current user info (当前用户信息):"
-          whoami
-          id
+          # Delete build log if too large
+          if [[ -f "SGSI-build-tool/10/make.log" ]]; then
+            log_size=$(stat -c%s "SGSI-build-tool/10/make.log")
+            if [[ $log_size -gt 104857600 ]]; then
+              echo "🗑️ Removing large build log (删除大型构建日志)..."
+              rm -f SGSI-build-tool/10/make.log
+            fi
+          fi
           
-          echo "🔍 Current directory (当前目录):"
+          echo "✅ Intermediate files cleaned (中间文件已清理)"
+          df -h
+
+      - name: "Debug Patch Directory (调试补丁目录)"
+        run: |
+          echo "=== Debug Patch Directory (调试补丁目录) ==="
+          echo "📁 Current working directory (当前工作目录):"
           pwd
+          echo "📁 Directory structure (目录结构):"
           ls -la
           
-          echo "🔍 Patch directory details (补丁目录详情):"
           if [[ -d "Patch" ]]; then
+            echo "✅ Patch directory exists (补丁目录存在)"
+            echo "📁 Patch directory contents (补丁目录内容):"
             ls -la Patch/
+            
             for i in 1 2 3; do
               patch_dir="Patch/Patch${i}"
               if [[ -d "$patch_dir" ]]; then
-                echo "📁 Patch${i} details:"
+                echo "✅ $patch_dir exists ($patch_dir 存在)"
+                echo "📁 $patch_dir contents ($patch_dir 内容):"
                 ls -la "$patch_dir"
-                echo "🔍 Checking META-INF directory:"
-                if [[ -d "$patch_dir/META-INF" ]]; then
-                  ls -la "$patch_dir/META-INF/"
-                  if [[ -d "$patch_dir/META-INF/com" ]]; then
-                    ls -la "$patch_dir/META-INF/com/"
-                    if [[ -d "$patch_dir/META-INF/com/google" ]]; then
-                      ls -la "$patch_dir/META-INF/com/google/"
-                      if [[ -d "$patch_dir/META-INF/com/google/android" ]]; then
-                        ls -la "$patch_dir/META-INF/com/google/android/"
-                      fi
-                    fi
-                  fi
-                fi
+                file_count=$(find "$patch_dir" -type f | wc -l)
+                echo "📊 $patch_dir file count: $file_count ($patch_dir 文件数量: $file_count)"
+              else
+                echo "❌ $patch_dir does not exist ($patch_dir 不存在)"
               fi
             done
+          else
+            echo "❌ Patch directory does not exist (补丁目录不存在)"
           fi
           
-          echo "🔍 Disk space (磁盘空间):"
+          echo "💾 Current disk space (当前磁盘空间):"
+          df -h
+
+      - name: "Check Disk Space (检查磁盘空间)"
+        run: |
+          echo "💾 Disk space check (磁盘空间检查):"
+          df -h
+          available_space=$(df . | awk 'NR==2 {print $4}')
+          if [[ $available_space -lt 1048576 ]]; then
+            echo "⚠️ Low disk space, cleaning temp files (磁盘空间不足，清理临时文件)..."
+            sudo rm -rf /tmp/* /var/tmp/*
+            sudo apt-get clean
+            echo "💾 Disk space after cleanup (清理后磁盘空间):"
+            df -h
+          fi
+
+      - name: "Package Patches - Method 1 (ZIP打包)"
+        id: package_patches_zip
+        run: |
+          echo "=== Package Patches - ZIP Method (补丁打包 - ZIP方法) ==="
+          
+          # Ensure patch directory exists
+          if [[ ! -d "Patch" ]]; then
+            echo "ℹ️ No Patch directory found, skipping patch packaging (未找到Patch目录，跳过补丁打包)"
+            echo "patch_method=none" >> $GITHUB_OUTPUT
+            echo "patch_count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Create target directory
+          mkdir -p SGSI-build-tool/10/SGSI/
+          
+          echo "💾 Disk space before patch packaging (补丁打包前磁盘空间):"
           df -h
           
-          echo "🔍 Memory info (内存信息):"
-          free -h
-
-      - name: "Simple Patch Copy (简单补丁复制)"
-        id: simple_patches
-        run: |
-          echo "=== Simple Patch Copy (简单补丁复制) ==="
-          
-          # Disable error exit for this step
-          set +e
-          
+          # Check each patch directory and package
           patch_count=0
-          
-          # Create SGSI directory with proper permissions
-          echo "🔧 Creating SGSI directory (创建SGSI目录)..."
-          mkdir -p SGSI-build-tool/10/SGSI/
-          chmod 755 SGSI-build-tool/10/SGSI/
-          
-          # Simple direct copy - no fancy methods
-          for patch_num in 1 2 3; do
-            patch_dir="Patch/Patch${patch_num}"
-            target_dir="SGSI-build-tool/10/SGSI/Patch${patch_num}"
+          for i in {1..3}; do
+            patch_dir="Patch/Patch${i}"
+            output_file="Patch${i}.zip"
             
-            if [[ -d "$patch_dir" ]]; then
-              echo "📦 Copying Patch${patch_num} (复制补丁${patch_num})..."
+            if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
+              echo "📦 Packaging patch $i: $patch_dir → $output_file (打包补丁 $i)"
               
-              # Remove target if exists
-              if [[ -d "$target_dir" ]]; then
-                rm -rf "$target_dir"
-              fi
+              # Check patch directory contents
+              echo "📁 Patch directory contents (补丁目录内容):"
+              ls -la "$patch_dir" || echo "Cannot list patch directory (无法列出补丁目录)"
               
-              # Simple copy command
-              echo "🔄 Copy command: cp -r \"$patch_dir\" \"$target_dir\""
-              cp -r "$patch_dir" "$target_dir"
-              copy_exit_code=$?
-              
-              if [[ $copy_exit_code -eq 0 ]] && [[ -d "$target_dir" ]]; then
-                ((patch_count++))
-                echo "✅ Patch${patch_num} copied successfully (补丁${patch_num}复制成功)"
-                echo "📁 Target directory contents (目标目录内容):"
-                ls -la "$target_dir" | head -10
+              # Use safer packaging method
+              echo "🔧 Starting packaging (开始打包)..."
+              if (cd "$patch_dir" && zip -r "../$output_file" . -q); then
+                echo "✅ Patch packaging successful: $output_file (补丁打包成功: $output_file)"
+                # Check generated file
+                if [[ -f "../$output_file" ]]; then
+                  file_size=$(stat -c%s "../$output_file" 2>/dev/null || echo "0")
+                  echo "📦 Package file size: $(numfmt --to=iec $file_size) (打包文件大小)"
+                  # Try to move file
+                  if mv "../$output_file" "SGSI-build-tool/10/SGSI/" 2>/dev/null; then
+                    echo "✅ File move successful (文件移动成功)"
+                    ((patch_count++))
+                  elif sudo mv "../$output_file" "SGSI-build-tool/10/SGSI/" 2>/dev/null; then
+                    echo "✅ File move successful (using sudo) (文件移动成功 - 使用sudo)"
+                    ((patch_count++))
+                  else
+                    echo "⚠️ Cannot move file $output_file (无法移动文件 $output_file)"
+                    # Clean up file
+                    rm -f "../$output_file" 2>/dev/null || true
+                  fi
+                else
+                  echo "❌ Package file not generated (打包文件未生成)"
+                fi
               else
-                echo "❌ Patch${patch_num} copy failed with exit code: $copy_exit_code (补丁${patch_num}复制失败)"
-                echo "🔍 Debug info:"
-                echo "Source exists: $(test -d "$patch_dir" && echo "Yes" || echo "No")"
-                echo "Target parent exists: $(test -d "$(dirname "$target_dir")" && echo "Yes" || echo "No")"
-                echo "Target parent permissions: $(ls -ld "$(dirname "$target_dir")" 2>/dev/null || echo "N/A")"
+                echo "❌ Patch packaging failed: $patch_dir (补丁打包失败: $patch_dir)"
+                # Clean up possible incomplete files
+                rm -f "../$output_file" 2>/dev/null || true
               fi
             else
-              echo "ℹ️ Patch${patch_num} not found (补丁${patch_num}不存在)"
+              echo "ℹ️ Patch directory does not exist or is empty: $patch_dir (补丁目录不存在或为空: $patch_dir)"
             fi
             echo "---"
           done
           
-          # Re-enable error exit
-          set -e
+          echo "✅ Patch file packaging completed, successfully packaged $patch_count patches (补丁文件打包完成，成功打包 $patch_count 个补丁)"
           
+          # Save results
+          echo "patch_method=zip" >> $GITHUB_OUTPUT
           echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
-          echo "✅ Simple patch copy completed: $patch_count patches (简单补丁复制完成: $patch_count 个补丁)"
+          
+          echo "💾 Disk space after packaging (打包后磁盘空间):"
+          df -h
 
-      - name: "Alternative Patch Method (替代补丁方法)"
-        id: alternative_patches
-        if: steps.simple_patches.outputs.patch_count == '0'
+      - name: "Package Patches - Method 2 (File Copy)"
+        id: package_patches_copy
+        if: steps.package_patches_zip.outputs.patch_count == '0'
         run: |
-          echo "=== Alternative Patch Method (替代补丁方法) ==="
+          echo "=== Package Patches - File Copy Method (补丁打包 - 文件复制方法) ==="
           
-          set +e
+          # Check if patch directory exists
+          if [[ ! -d "Patch" ]]; then
+            echo "ℹ️ No Patch directory found, skipping patch processing (未找到Patch目录，跳过补丁处理)"
+            echo "patch_method=none" >> $GITHUB_OUTPUT
+            echo "patch_count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "💾 Current disk space (当前磁盘空间):"
+          df -h
+          
+          # First fix SGSI directory permissions
+          echo "🔧 Fixing SGSI directory permissions (修复SGSI目录权限)..."
+          sudo mkdir -p SGSI-build-tool/10/SGSI/
+          sudo chown -R $(id -u):$(id -g) SGSI-build-tool/10/SGSI/
+          sudo chmod -R 755 SGSI-build-tool/10/SGSI/
+          
+          # Try simple file copying instead of packaging
           patch_count=0
-          
-          echo "🔄 Trying alternative patch methods (尝试替代补丁方法)..."
-          
-          for patch_num in 1 2 3; do
-            patch_dir="Patch/Patch${patch_num}"
-            if [[ -d "$patch_dir" ]]; then
-              echo "📦 Alternative method for Patch${patch_num} (补丁${patch_num}的替代方法)..."
+          for i in 1 2 3; do
+            patch_dir="Patch/Patch${i}"
+            if [[ -d "$patch_dir" ]] && [[ -n "$(ls -A "$patch_dir" 2>/dev/null)" ]]; then
+              echo "📁 Copying patch directory: $patch_dir (复制补丁目录: $patch_dir)"
               
-              # Method 1: Use find and cpio
-              echo "🔄 Method 1: find + cpio"
-              if (cd "$patch_dir" && find . -print | cpio -pdum "SGSI-build-tool/10/SGSI/Patch${patch_num}" 2>/dev/null); then
-                ((patch_count++))
-                echo "✅ Patch${patch_num} copied with cpio"
-                continue
-              fi
+              # Create target directory (don't use sudo, since we've fixed permissions)
+              target_dir="SGSI-build-tool/10/SGSI/Patch${i}"
+              mkdir -p "$target_dir"
               
-              # Method 2: Use python
-              echo "🔄 Method 2: python"
-              if python3 -c "import shutil, os; shutil.copytree('$patch_dir', 'SGSI-build-tool/10/SGSI/Patch${patch_num}')" 2>/dev/null; then
+              echo "🔧 Starting file copy (开始复制文件)..."
+              if cp -r "$patch_dir"/* "$target_dir"/ 2>/dev/null; then
+                echo "✅ Patch $i copy successful (补丁 $i 复制成功)"
                 ((patch_count++))
-                echo "✅ Patch${patch_num} copied with python"
-                continue
-              fi
-              
-              # Method 3: Manual file-by-file copy
-              echo "🔄 Method 3: Manual file copy"
-              mkdir -p "SGSI-build-tool/10/SGSI/Patch${patch_num}"
-              if find "$patch_dir" -type f -exec cp --parents -t "SGSI-build-tool/10/SGSI/Patch${patch_num}" {} + 2>/dev/null; then
-                ((patch_count++))
-                echo "✅ Patch${patch_num} copied manually"
               else
-                echo "❌ All alternative methods failed for Patch${patch_num}"
+                echo "⚠️ Patch $i copy failed, checking permissions (补丁 $i 复制失败，检查权限)..."
+                # Check source and target directory permissions
+                echo "📁 Source directory permissions: $(ls -ld "$patch_dir" 2>/dev/null || echo "无法访问")"
+                echo "📁 Target directory permissions: $(ls -ld "$target_dir" 2>/dev/null || echo "无法访问")"
+                
+                # Try using tar to preserve permissions
+                echo "🔄 Trying to copy using tar (尝试使用tar复制)..."
+                if (cd "$patch_dir" && tar cf - . | (cd "$target_dir" && tar xf -)); then
+                  echo "✅ Patch $i copy successful (using tar) (补丁 $i 复制成功 - 使用tar)"
+                  ((patch_count++))
+                else
+                  echo "❌ All copy methods failed for patch $i (补丁 $i 所有复制方法都失败)"
+                fi
+              fi
+            else
+              echo "ℹ️ Patch directory $patch_dir does not exist or is empty (补丁目录 $patch_dir 不存在或为空)"
+            fi
+            echo "---"
+          done
+          
+          echo "Patch processing completed: $patch_count successful (补丁处理完成: $patch_count 个成功)"
+          echo "Using file copy method instead of ZIP packaging (使用文件复制方式替代ZIP打包)"
+          
+          # Save results
+          echo "patch_method=copy" >> $GITHUB_OUTPUT
+          echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
+          
+          echo "💾 Disk space after copying (复制后磁盘空间):"
+          df -h
+
+      - name: "Package Patches - Method 3 (Optimized ZIP)"
+        id: package_patches_optimized
+        if: steps.package_patches_zip.outputs.patch_count == '0' && steps.package_patches_copy.outputs.patch_count == '0'
+        run: |
+          echo "=== Package Patches - Optimized ZIP Method (补丁打包 - 优化ZIP方法) ==="
+          
+          if [[ ! -d "Patch" ]]; then
+            echo "patch_method=none" >> $GITHUB_OUTPUT
+            echo "patch_count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Create target directory
+          mkdir -p SGSI-build-tool/10/SGSI/
+          
+          patch_count=0
+          # Only process existing patch directories
+          for i in 1 2 3; do
+            if [[ -d "Patch/Patch${i}" ]] && [[ -n "$(ls Patch/Patch${i}/ 2>/dev/null)" ]]; then
+              echo "🔄 Creating optimized ZIP for Patch${i} (为补丁${i}创建优化ZIP)..."
+              
+              # Use optimized zip with compression level 0 (store only)
+              if (cd "Patch/Patch${i}" && zip -r -0 "../Patch${i}.zip" . -q); then
+                if [[ -f "Patch${i}.zip" ]]; then
+                  mv "Patch${i}.zip" "SGSI-build-tool/10/SGSI/" && ((patch_count++))
+                  echo "✅ Optimized Patch${i} created (优化补丁${i}创建成功)"
+                fi
               fi
             fi
           done
           
-          set -e
-          echo "alternative_count=$patch_count" >> $GITHUB_OUTPUT
-          echo "✅ Alternative methods completed: $patch_count patches (替代方法完成: $patch_count 个补丁)"
-
-      - name: "Skip Patches if All Failed (如果所有补丁都失败则跳过)"
-        if: steps.simple_patches.outputs.patch_count == '0' && steps.alternative_patches.outputs.alternative_count == '0'
-        run: |
-          echo "⚠️ All patch methods failed, continuing without patches (所有补丁方法都失败，继续但不包含补丁)"
-          mkdir -p SGSI-build-tool/10/SGSI/
-          echo "Created empty SGSI directory (创建了空的SGSI目录)"
+          echo "patch_method=optimized_zip" >> $GITHUB_OUTPUT
+          echo "patch_count=$patch_count" >> $GITHUB_OUTPUT
+          echo "✅ Optimized patch packaging completed (优化补丁打包完成)"
 
       - name: "Create Final Package (创建最终包)"
         run: |
           echo "=== Create Final Package (创建最终包) ==="
+          cd SGSI-build-tool/10
           
-          # Create upload directory
-          mkdir -p upload
+          echo "📁 Current directory: $(pwd)"
+          echo "📁 Directory contents (目录内容):"
+          ls -la
           
-          # Check if SGSI directory exists and has content
-          if [[ ! -d "SGSI-build-tool/10/SGSI" ]]; then
-            echo "⚠️ SGSI directory does not exist, creating empty one (SGSI目录不存在，创建空目录)"
-            mkdir -p SGSI-build-tool/10/SGSI/
-          fi
-          
-          echo "📁 Contents of SGSI directory (SGSI目录内容):"
-          ls -la SGSI-build-tool/10/SGSI/ 2>/dev/null || echo "Cannot list SGSI directory"
-          
-          output_file="${{ steps.config.outputs.pack_sgsi }}"
-          
-          echo "📦 Creating package: $output_file"
-          
-          # Create zip package
-          if zip -r "$output_file" SGSI-build-tool/10/SGSI/ 2>/dev/null; then
-            echo "✅ Package created successfully (包创建成功)"
-          else
-            echo "⚠️ Standard zip failed, trying with no compression (标准zip失败，尝试无压缩)..."
-            if zip -r -0 "$output_file" SGSI-build-tool/10/SGSI/ 2>/dev/null; then
-              echo "✅ Package created with no compression (无压缩包创建成功)"
-            else
-              echo "❌ All zip methods failed, creating empty package (所有zip方法失败，创建空包)..."
-              mkdir -p temp_sgsi
-              echo "No patches available" > temp_sgsi/README.txt
-              zip "$output_file" temp_sgsi/README.txt
-              rm -rf temp_sgsi
-            fi
-          fi
-          
-          # Verify the package was created
-          if [[ ! -f "$output_file" ]]; then
-            echo "::error::❌ Package file was not created (包文件未创建)"
+          # Verify SGSI directory exists and has content
+          if [[ ! -d "SGSI" ]]; then
+            echo "::error::❌ SGSI directory does not exist! (SGSI目录不存在！)"
+            echo "📁 Current directory contents (当前目录内容):"
+            ls -la
             exit 1
           fi
           
-          # Check file size and split if necessary
-          file_size=$(stat -c%s "$output_file" 2>/dev/null || echo "0")
-          max_size=2097152000  # 2GB
-          
-          echo "📊 Package size: $(numfmt --to=iec $file_size)"
-          
-          if [[ $file_size -gt $max_size ]]; then
-            echo "⚠️ Package exceeds 2GB, splitting into 1024MB segments (包超过2GB，分卷处理)..."
-            
-            # Split using tar and split
-            tar -cpzf - "$output_file" | split -d -b 1024m - "upload/${output_file}."
-            echo "✅ Split packaging completed (分卷打包完成)"
-            
-            # Remove original large file
-            rm -f "$output_file"
-          else
-            echo "📤 Moving single package to upload directory (移动单包到上传目录)"
-            mv "$output_file" upload/
+          if [[ -z "$(ls -A SGSI/ 2>/dev/null)" ]]; then
+            echo "::error::❌ SGSI directory is empty! (SGSI目录为空！)"
+            echo "📁 SGSI directory contents (SGSI目录内容):"
+            ls -la SGSI/ || echo "Cannot list SGSI directory (无法列出SGSI目录)"
+            exit 1
           fi
           
-          echo "📁 Final artifacts in upload/ (最终产物):"
-          ls -lh upload/ 2>/dev/null || echo "Upload directory is empty"
+          echo "📁 SGSI directory contents (SGSI目录内容):"
+          ls -la SGSI/
           
-          # Set upload directory environment variable
-          echo "UPLOAD_DIR=upload" >> $GITHUB_ENV
+          # Create output filename
+          output_file="${{ steps.config.outputs.pack_sgsi }}"
           
-          echo "✅ Final packaging completed (最终打包完成)"
+          # Fix file ownership
+          echo "Fixing file ownership (修复文件所有权)..."
+          sudo chown -R $(id -u):$(id -g) SGSI/
+          sudo chmod -R 755 SGSI/
+          
+          # Package files
+          echo "Packaging SGSI to: $output_file"
+          echo "💾 Disk space before packaging (打包前磁盘空间):"
           df -h
-
-      - name: "Create Release (创建发布)"
-        id: create_release
+          
+          if ! zip -r -q "$output_file" SGSI/*; then
+            echo "::error::❌ Packaging failed! (打包失败！)"
+            echo "Trying to package with verbose mode (尝试使用详细模式重新打包)..."
+            if ! zip -r "$output_file" SGSI/*; then
+              echo "::error::❌ Verbose mode packaging also failed (详细模式打包也失败)"
+              exit 1
+            fi
+          fi
+          
+          # Verify package file
+          if [[ ! -f "$output_file" ]]; then
+            echo "::error::❌ Output file was not created (输出文件未创建)"
+            exit 1
+          fi
+          
+          file_size=$(stat -c%s "$output_file")
+          if [[ $file_size -eq 0 ]]; then
+            echo "::error::❌ Output file is empty (输出文件为空)"
+            exit 1
+          fi
+          
+          echo "✅ Package created: $output_file ($(numfmt --to=iec-i $file_size))"
+          
+          # Prepare upload directory
+          mkdir -p "${GITHUB_WORKSPACE}/upload"
+          max_size=2000000000  # 2GB
+          
+          # Check file size and split if necessary
+          if [[ $file_size -gt $max_size ]]; then
+            echo "⚠️ File too large, splitting into parts (文件过大，进行分卷打包)..."
+            split -b 1500m -d -a 1 "$output_file" "${output_file}_part"
+            mv "${output_file}_part"* "${GITHUB_WORKSPACE}/upload/"
+            rm "$output_file"
+            echo "Split file list (分卷文件列表):"
+            ls -lh "${GITHUB_WORKSPACE}/upload"
+          else
+            echo "Moving file to upload directory (移动文件到上传目录)"
+            mv "$output_file" "${GITHUB_WORKSPACE}/upload/"
+          fi
+          
+          # Ensure upload directory has content
+          echo "=== Upload directory contents (上传目录内容) ==="
+          ls -lh "${GITHUB_WORKSPACE}/upload" || { echo "❌ Upload directory is empty! (上传目录为空！)"; exit 1; }
+          echo "===================="
+          
+          # Save upload directory path
+          echo "UPLOAD_DIR=${GITHUB_WORKSPACE}/upload" >> $GITHUB_ENV
+          
+          echo "💾 Final disk space (最终磁盘空间):"
+          df -h
+             
+      - name: "Upload to GitHub Artifacts"
+        uses: actions/upload-artifact@v4
+        with:
+          name: sgsi-build-artifacts
+          path: ${{ env.UPLOAD_DIR }}/*
+          retention-days: 30
+        continue-on-error: true
+             
+      - name: "Generate Release Tag and Time Info (生成发布标签和时间信息)"
+        id: release_tag
         run: |
-          echo "=== Create Release Info (创建发布信息) ==="
+          current_date=$(TZ='Asia/Shanghai' date +"%Y%m%d")
+          timestamp=$(TZ='Asia/Shanghai' date +"%H%M")
           
-          current_date=$(date +"%Y%m%d")
-          timestamp=$(date +"%H%M")
-          
-          # Determine ROM type
           rom_type="Generic"
           if [ "${{ steps.config.outputs.make_miui }}" = "true" ]; then rom_type="MIUI"; fi
           if [ "${{ steps.config.outputs.make_flyme }}" = "true" ]; then rom_type="Flyme"; fi
@@ -580,50 +704,83 @@ jobs:
           if [ "${{ steps.config.outputs.make_smartisanos }}" = "true" ]; then rom_type="SmartisanOS"; fi
           if [ "${{ steps.config.outputs.make_zui }}" = "true" ]; then rom_type="ZUI"; fi
           
-          release_tag="${current_date}-${timestamp}-${rom_type}-1.9"
-          build_time=$(date +"%Y-%m-%d %H:%M")
+          release_tag="${current_date}_${timestamp}-${rom_type}-1.9"
+          echo "release_tag=$release_tag" >> $GITHUB_OUTPUT
           
-          {
-            echo "release_tag=$release_tag"
-            echo "build_time=$build_time" 
-            echo "rom_type=$rom_type"
-          } >> $GITHUB_OUTPUT
+          build_time=$(TZ='Asia/Shanghai' date +"%Y-%m-%d %p %I:%M")
+          build_time=$(echo "$build_time" | sed -e 's/AM/上午/' -e 's/PM/下午/')
+          build_time="${build_time} [北京时间]"
+          echo "build_time=$build_time" >> $GITHUB_OUTPUT
           
-          echo "🏷️ Release Tag: $release_tag"
-          echo "🕐 Build Time: $build_time"
-          echo "📱 ROM Type: $rom_type"
-
-      - name: "Upload Release (上传发布)"
-        uses: ncipollo/release-action@v1.8.6
+          original_build_date="${{ steps.build_sgsi.outputs.build_date }}"
+          if [[ "$original_build_date" != "Unknown" ]]; then
+            parsed_date=$(echo "$original_build_date" | sed -E 's/([a-zA-Z]{3})([a-zA-Z]{3})([0-9]{2})([0-9]{2}:[0-9]{2}:[0-9]{2})([A-Z]{3})([0-9]{4})/\1 \2 \3 \4 \5 \6/' 2>/dev/null)
+            formatted_date=$(date -d "$parsed_date" "+%Y-%m-%d %H:%M:%S %Z" 2>/dev/null || echo "$original_build_date")
+            echo "formatted_build_date=$formatted_date" >> $GITHUB_OUTPUT
+          else
+            echo "formatted_build_date=Unknown" >> $GITHUB_OUTPUT
+          fi
+          
+          model="${{ steps.build_sgsi.outputs.model }}"
+          device_codename="${{ steps.build_sgsi.outputs.device_codename }}"
+          if [[ "$model" == "Unknown" && "$device_codename" == "Unknown" ]]; then
+            source_device="Unknown"
+          elif [[ "$model" == "Unknown" ]]; then
+            source_device="$device_codename"
+          elif [[ "$device_codename" == "Unknown" ]]; then
+            source_device="$model"
+          else
+            source_device="$model [$device_codename]"
+          fi
+          echo "source_device=$source_device" >> $GITHUB_OUTPUT
+          
+          echo "rom_type=$rom_type" >> $GITHUB_OUTPUT
+          
+          echo "Generated release tag: $release_tag (生成的发布标签: $release_tag)"
+          echo "Build time: $build_time (构建时间: $build_time)"
+          echo "ROM type: $rom_type (ROM 类型: $rom_type)"
+          
+      - name: "Create Release (创建发布)"
+        uses: softprops/action-gh-release@v1
         with:
-          artifacts: '${{ env.UPLOAD_DIR }}/*'
-          name: 'SGSI Build ${{ steps.create_release.outputs.release_tag }}'
-          tag: '${{ steps.create_release.outputs.release_tag }}'
+          name: "Auto Build SGSI With XiaoxinTools [${{ steps.release_tag.outputs.release_tag }}]"
+          tag_name: "${{ steps.release_tag.outputs.release_tag }}"
+          files: "${{ env.UPLOAD_DIR }}/*"
           body: |
-            ## 📱 SGSI Build Information
+            ##  📱 SGSI Build Information (构建信息)
             
-            ### Build Details
-            - **Build Time:** ${{ steps.create_release.outputs.build_time }}
-            - **ROM Type:** ${{ steps.create_release.outputs.rom_type }}
-            - **Android Version:** ${{ steps.build_sgsi.outputs.android_version }}
-            - **Device Model:** ${{ steps.build_sgsi.outputs.model }}
-            - **Build Date:** ${{ steps.build_sgsi.outputs.build_date }}
-            - **Patches Applied:** ${{ steps.simple_patches.outputs.patch_count || steps.alternative_patches.outputs.alternative_count || '0' }}
+            ### 基础信息 (Basic Info)
+            - **构建时间 (Built at):** ${{ steps.release_tag.outputs.build_time }}
+            - **原包机型 (Source Device):** ${{ steps.release_tag.outputs.source_device }}
+            - **ROM 类型 (ROM Type):** ${{ steps.release_tag.outputs.rom_type }}
+            - **Android 版本 (Android Version):** ${{ steps.build_sgsi.outputs.android_version }}
+            - **ROM 版本 (ROM Version):** ${{ steps.build_sgsi.outputs.rom_version }}
+            - **构建 ID (Build ID):** ${{ steps.build_sgsi.outputs.build_id }}
+            - **安全补丁 (Security Patch):** ${{ steps.build_sgsi.outputs.security_patch }}
+            - **原构建日期 (Source Build Date):** ${{ steps.release_tag.outputs.formatted_build_date }}
+            - **补丁打包方式:** ${{ steps.package_patches_zip.outputs.patch_method || steps.package_patches_copy.outputs.patch_method || steps.package_patches_optimized.outputs.patch_method || 'None' }}
+            - **补丁数量:** ${{ steps.package_patches_zip.outputs.patch_count || steps.package_patches_copy.outputs.patch_count || steps.package_patches_optimized.outputs.patch_count || '0' }}
             
-            ### Download
-            Artifacts are available for download below.
+            ### 下载链接 (Download Links)
+            - **GitHub Artifacts（30天保留）:** [点击下载](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts)
             
-            ### Notes
-            This is an automated SGSI build using XiaoxinTools 1.9
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: "Completion Summary (完成总结)"
+            ### 其他信息 (Other Info)
+            - **构建工具 (Build Tools):** XiaoxinTools_1.9 (Only for Android 10/AB)
+            - **构建日志 (Build Log):** [View Details](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) (点击查看详细日志)
+            
+            ---
+            
+             ⚠️ **实验性构建 (Experimental Build):**  
+            This is an experimental build and may have stability issues. Please test before using as a daily driver.  
+            这是实验性构建，可能存在稳定性问题，请测试后再作为主力系统使用。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: "Completion Notification (完成通知)"
         if: success()
         run: |
-          echo "🎉 Build Process Completed! (构建过程完成!)"
-          echo "🏷️ Release: ${{ steps.create_release.outputs.release_tag }}"
-          echo "📦 Artifacts: ${{ env.UPLOAD_DIR }}"
-          echo "📊 Simple Patches: ${{ steps.simple_patches.outputs.patch_count || '0' }}"
-          echo "🔄 Alternative Patches: ${{ steps.alternative_patches.outputs.alternative_count || '0' }}"
-          echo "📱 Device: ${{ steps.build_sgsi.outputs.model || 'Unknown' }}"
-          echo "🤖 Android: ${{ steps.build_sgsi.outputs.android_version || 'Unknown' }}"
+          echo "🎉 Build completed! (构建完成!)"
+          echo "Release tag: ${{ steps.release_tag.outputs.release_tag }} (发布标签)"
+          echo "Artifact location: ${{ env.UPLOAD_DIR }} (产物位置)"
+          echo "Patch method: ${{ steps.package_patches_zip.outputs.patch_method || steps.package_patches_copy.outputs.patch_method || steps.package_patches_optimized.outputs.patch_method || 'None' }}"
+          echo "Patch count: ${{ steps.package_patches_zip.outputs.patch_count || steps.package_patches_copy.outputs.patch_count || steps.package_patches_optimized.outputs.patch_count || '0' }}"
